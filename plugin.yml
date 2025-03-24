@@ -1,14 +1,16 @@
-name: Buildkite Plugin
-description: Exceptional functionality
+name: Bazel BEP Annotator
+description: Creates Buildkite annotations from Bazel Event Protocol output
 author: https://github.com/buildkite-plugins
 requirements:
   - bash
+  - jq
+  - bc
 configuration:
   properties:
-    mandatory:
+    bep_file:
       type: string
-    optional:
+    bazel_command:
       type: string
-  required:
-    - mandatory
+    skip_if_no_bep:
+      type: boolean
   additionalProperties: false
