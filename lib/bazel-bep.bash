@@ -111,6 +111,7 @@ process_bep() {
         # If it has output files but doesn't have actionExecuted, it's likely cached
         if ! echo "$line" | jq -e '.completed.actionExecuted != null' > /dev/null 2>&1; then
           # is_cached flag set for potential future use
+          # shellcheck disable=SC2034
           is_cached=true
           ((cached_count++))
         fi
