@@ -32,11 +32,13 @@ create_annotation() {
   # Check if we're running in Buildkite
   if [ -n "${BUILDKITE:-}" ] && command -v buildkite-agent >/dev/null 2>&1; then
     echo "Creating Buildkite annotation..."
-    buildkite-agent annotate "$content" --style "$style" --context "$context_id"
+    # Use printf to ensure newlines are properly interpreted
+    printf "%s" "$content" | buildkite-agent annotate --style "$style" --context "$context_id"
   else
     # We're not in Buildkite, just display the content on stdout
     echo "Not running in Buildkite. Would create annotation with style '$style':"
-    echo "$content"
+    # Use printf to properly display the markdown
+    printf "%s" "$content"
   fi
 }
 
@@ -117,13 +119,19 @@ process_bep() {
         ((fail_count++))
         # Get failure details with proper highlighting
         local errors=$(echo "$line" | jq -r '.completed.failureDetail.message // "Unknown error"')
-        failure_details+="### ❌ Failed: $label\n\`\`\`diff\n- ERROR: $errors\n\`\`\`\n\n"
+        failure_details+="### ❌ Failed: $label
+\`\`\`diff
+- ERROR: $errors
+\`\`\`
 
+"
         # Check for missing dependency or deleted package errors
         if echo "$errors" | grep -q "no such target\|no such package\|Package is considered deleted"; then
           # Extract relevant part of the error message
           local error_detail=$(echo "$errors" | grep -o "'[^']*'\|Package [^:]*" | head -1)
-          failure_details+="**🔍 Possible Fix:** $error_detail might be missing, renamed, or deleted. Add it to --deleted_packages flag if it's intentionally deleted.\n\n"
+          failure_details+="**🔍 Possible Fix:** $error_detail might be missing, renamed, or deleted. Add it to --deleted_packages flag if it's intentionally deleted.
+
+"
         fi
       fi
     fi
@@ -188,13 +196,20 @@ process_bep() {
           status_emoji="⏱️"
         fi
 
-        failure_details+="### $status_emoji Failed Test: $test_label ($test_status in ${test_time}s)\n\`\`\`diff\n- $test_errors\n\`\`\`\n\n"
+        failure_details+="### $status_emoji Failed Test: $test_label ($test_status in ${test_time}s)
+\`\`\`diff
+- $test_errors
+\`\`\`
+
+"
 
         # Add stack trace if available
         if echo "$line" | jq -e 'has("testResult") and .testResult | has("testActionOutput") and .testResult.testActionOutput != null' > /dev/null 2>&1; then
           if echo "$line" | jq -e '.testResult.testActionOutput[] | select(.name == "test.log") | .uri' > /dev/null 2>&1; then
             local log_uri=$(echo "$line" | jq -r '.testResult.testActionOutput[] | select(.name == "test.log") | .uri')
-            failure_details+="[View Full Test Log]($log_uri)\n\n"
+            failure_details+="[View Full Test Log]($log_uri)
+
+"
           fi
         fi
       fi
@@ -222,11 +237,14 @@ process_bep() {
   fi
 
   # Clean header for the output
-  local summary="## 🚀 Bazel Results\n\n"
+  local summary="## 🚀 Bazel Results
 
+"
   # Add command used if running in Buildkite
   if [ -n "${BUILDKITE_COMMAND:-}" ]; then
-    summary+="**🏃 Command:** \`${BUILDKITE_COMMAND}\`\n\n"
+    summary+="**🏃 Command:** \`${BUILDKITE_COMMAND}\`
+
+"
   fi
 
   if [ $total_build_time -gt 0 ]; then
@@ -245,11 +263,16 @@ process_bep() {
   if [ "$skip_count" -gt 0 ]; then
     summary+="| ⏭️ $skip_count skipped "
   fi
-  summary+="\n\n"
+  summary+="
+
+"
 
   # Add performance section with test timings in a collapsible section
   if [ ${#slowest_tests[@]} -gt 0 ]; then
-    summary+="\n<details>\n<summary><strong>⏱️ Test Durations</strong> (${#slowest_tests[@]} tests)</summary>\n\n"
+    summary+="<details>
+<summary><strong>⏱️ Test Durations</strong> (${#slowest_tests[@]} tests)</summary>
+
+"
 
     # First sort the tests by duration (longest first)
     local sorted_indexes=()
@@ -275,20 +298,27 @@ process_bep() {
 
     # Output the sorted results
     for i in "${!sorted_tests[@]}"; do
-      summary+="- \`${sorted_tests[$i]}\`: ${sorted_times[$i]}s\n"
+      summary+="- \`${sorted_tests[$i]}\`: ${sorted_times[$i]}s
+"
       if [ $i -ge 9 ]; then  # Show only top 10 slowest tests
         if [ ${#sorted_tests[@]} -gt 10 ]; then
-          summary+="- _...and $((${#sorted_tests[@]} - 10)) more_\n"
+          summary+="- _...and $((${#sorted_tests[@]} - 10)) more_
+"
         fi
         break
       fi
     done
-    summary+="</details>\n"
+    summary+="</details>
+"
   fi
 
   # Add list of successful targets in a collapsible section
   if [ ${#successful_targets[@]} -gt 0 ]; then
-    summary+="\n<details>\n<summary><strong>✅ Successfully Built</strong> (${#successful_targets[@]} targets)</summary>\n\n"
+    summary+="
+<details>
+<summary><strong>✅ Successfully Built</strong> (${#successful_targets[@]} targets)</summary>
+
+"
 
     # Sort the targets for better readability
     IFS=$'\n' successful_targets_sorted=($(sort <<<"${successful_targets[*]}"))
@@ -296,21 +326,32 @@ process_bep() {
 
     # Show all targets
     for target in "${successful_targets_sorted[@]}"; do
-      summary+="- \`$target\`\n"
+      summary+="- \`$target\`
+"
     done
 
-    summary+="</details>\n"
+    summary+="</details>
+"
   fi
 
   # Add details for failures if any in a collapsible section, but auto-expanded
   if [ -n "$failure_details" ]; then
-    summary+="\n<details open>\n<summary><strong>❌ Failure Details</strong> ($fail_count failures)</summary>\n\n"
-    summary+="$failure_details"
-    summary+="</details>\n"
+    summary+="
+<details open>
+<summary><strong>❌ Failure Details</strong> ($fail_count failures)</summary>
+
+$failure_details</details>
+"
   fi
 
   # Add random inspirational quote
-  summary+="\n---\n\n💡 **Random Dev Wisdom:**\n\n_$(get_random_quote)_\n"
+  summary+="
+---
+
+💡 **Random Dev Wisdom:**
+
+_$(get_random_quote)_
+"
 
   # Create the annotation
   create_annotation "$style" "$summary"
