@@ -41,7 +41,7 @@ steps:
     command: |
       bazel build //... --build_event_json_file=bazel-events.json
     plugins:
-      - bazel-annotate#v0.1.0:
+      - mcncl/bazel-annotate#v0.1.0:
           bep_file: bazel-events.json
 ```
 
@@ -55,7 +55,7 @@ steps:
       # Command might not produce a BEP file
       bazel build //...
     plugins:
-      - bazel-annotate#v0.1.0:
+      - mcncl/bazel-annotate#v0.1.0:
           skip_if_no_bep: true
 ```
 
@@ -69,7 +69,7 @@ steps:
     command: |
       bazel test //... --build_event_json_file=bazel-test-events.json
     plugins:
-      - bazel-annotate#v0.1.0:
+      - mcncl/bazel-annotate#v0.1.0:
           bep_file: bazel-test-events.json
 ```
 
@@ -82,7 +82,7 @@ steps:
       cd my-workspace
       bazel build //... --build_event_json_file=bazel-events.json
     plugins:
-      - bazel-annotate#v0.1.0:
+      - mcncl/bazel-annotate#v0.1.0:
           bep_file: my-workspace/bazel-events.json
 ```
 
