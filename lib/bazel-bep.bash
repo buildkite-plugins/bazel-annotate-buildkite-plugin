@@ -99,14 +99,17 @@ process_bep() {
 
     # Extract target information
     if echo "$line" | jq -e '.id.targetCompleted != null' > /dev/null 2>&1; then
-      local label=$(echo "$line" | jq -r '.id.targetCompleted.label // "unknown"')
-      local success=$(echo "$line" | jq -r '.completed.success // "false"')
+      local label
+      label=$(echo "$line" | jq -r '.id.targetCompleted.label // "unknown"')
+      local success
+      success=$(echo "$line" | jq -r '.completed.success // "false"')
       local is_cached=false
 
       # Check if the target was cached
       if echo "$line" | jq -e '.completed.outputGroup != null and (.completed.outputGroup[] | select(.name == "bazel-out") | .fileSets[] | select(.id != null))' > /dev/null 2>&1; then
         # If it has output files but doesn't have actionExecuted, it's likely cached
         if ! echo "$line" | jq -e '.completed.actionExecuted != null' > /dev/null 2>&1; then
+          # is_cached flag set for potential future use
           is_cached=true
           ((cached_count++))
         fi
@@ -118,7 +121,8 @@ process_bep() {
       else
         ((fail_count++))
         # Get failure details with proper highlighting
-        local errors=$(echo "$line" | jq -r '.completed.failureDetail.message // "Unknown error"')
+        local errors
+        errors=$(echo "$line" | jq -r '.completed.failureDetail.message // "Unknown error"')
         failure_details+="### ❌ Failed: $label
 \`\`\`diff
 - ERROR: $errors
@@ -128,7 +132,8 @@ process_bep() {
         # Check for missing dependency or deleted package errors
         if echo "$errors" | grep -q "no such target\|no such package\|Package is considered deleted"; then
           # Extract relevant part of the error message
-          local error_detail=$(echo "$errors" | grep -o "'[^']*'\|Package [^:]*" | head -1)
+          local error_detail
+          error_detail=$(echo "$errors" | grep -o "'[^']*'\|Package [^:]*" | head -1)
           failure_details+="**🔍 Possible Fix:** $error_detail might be missing, renamed, or deleted. Add it to --deleted_packages flag if it's intentionally deleted.
 
 "
@@ -138,8 +143,11 @@ process_bep() {
 
     # Also check for configured targets
     if echo "$line" | jq -e '.id.configured != null' > /dev/null 2>&1; then
-      local label=$(echo "$line" | jq -r '.id.configured.targetLabel // "unknown"')
-      if [[ ! " ${successful_targets[*]} " =~ " ${label} " ]]; then
+      local label
+      label=$(echo "$line" | jq -r '.id.configured.targetLabel // "unknown"')
+      # Using a simple pattern match to check if the label is in the array
+      # Avoiding regex comparison which causes shellcheck warning
+      if [[ ! " ${successful_targets[*]} " == *" $label "* ]]; then
         # Only add if it's not already counted
         ((success_count++))
         successful_targets+=("$label")
@@ -148,15 +156,19 @@ process_bep() {
 
     # Extract skipped targets
     if echo "$line" | jq -e '.id.targetSkipped != null' > /dev/null 2>&1; then
-      local label=$(echo "$line" | jq -r '.id.targetSkipped.label // "unknown"')
+      local label
+      label=$(echo "$line" | jq -r '.id.targetSkipped.label // "unknown"')
       ((skip_count++))
     fi
 
     # Extract test results if available
     if echo "$line" | jq -e '.id.testResult != null' > /dev/null 2>&1; then
-      local test_label=$(echo "$line" | jq -r '.id.testResult.label // "unknown"')
-      local test_status=$(echo "$line" | jq -r '.testResult.status // "UNKNOWN"')
-      local test_time=$(echo "$line" | jq -r '.testResult.testActionDurationMillis // 0')
+      local test_label
+      test_label=$(echo "$line" | jq -r '.id.testResult.label // "unknown"')
+      local test_status
+      test_status=$(echo "$line" | jq -r '.testResult.status // "UNKNOWN"')
+      local test_time
+      test_time=$(echo "$line" | jq -r '.testResult.testActionDurationMillis // 0')
 
       # Default to 1.0s if no duration available
       if [ "$test_time" -eq 0 ]; then
@@ -178,8 +190,8 @@ process_bep() {
       fi
 
       # Always include test duration in the performance tracking
-      slowest_tests[$slowest_count]="$test_label"
-      slowest_times[$slowest_count]="$test_time"
+      slowest_tests[slowest_count]="$test_label"
+      slowest_times[slowest_count]="$test_time"
       ((slowest_count++))
 
       if [ "$test_status" != "PASSED" ]; then
@@ -206,7 +218,8 @@ process_bep() {
         # Add stack trace if available
         if echo "$line" | jq -e 'has("testResult") and .testResult | has("testActionOutput") and .testResult.testActionOutput != null' > /dev/null 2>&1; then
           if echo "$line" | jq -e '.testResult.testActionOutput[] | select(.name == "test.log") | .uri' > /dev/null 2>&1; then
-            local log_uri=$(echo "$line" | jq -r '.testResult.testActionOutput[] | select(.name == "test.log") | .uri')
+            local log_uri
+            log_uri=$(echo "$line" | jq -r '.testResult.testActionOutput[] | select(.name == "test.log") | .uri')
             failure_details+="[View Full Test Log]($log_uri)
 
 "
@@ -218,7 +231,7 @@ process_bep() {
 
   # Calculate total build time
   local total_build_time=0
-  if [ $build_end_time -gt 0 ] && [ $build_start_time -gt 0 ]; then
+  if [ "$build_end_time" -gt 0 ] && [ "$build_start_time" -gt 0 ]; then
     total_build_time=$(( (build_end_time - build_start_time) / 1000 ))
   fi
 
@@ -275,12 +288,15 @@ process_bep() {
 "
 
     # First sort the tests by duration (longest first)
+    # sorted_indexes is kept for potential future implementation of index tracking
+    # or for maintaining references to original array positions
     local sorted_indexes=()
     local sorted_times=()
     local sorted_tests=()
 
     # Create a temporary file to sort the data
-    local tmp_file=$(mktemp)
+    local tmp_file
+    tmp_file=$(mktemp)
 
     # Populate the temp file with "time test_name" format for sorting
     for i in "${!slowest_tests[@]}"; do
@@ -300,7 +316,7 @@ process_bep() {
     for i in "${!sorted_tests[@]}"; do
       summary+="- \`${sorted_tests[$i]}\`: ${sorted_times[$i]}s
 "
-      if [ $i -ge 9 ]; then  # Show only top 10 slowest tests
+      if [ "$i" -ge 9 ]; then  # Show only top 10 slowest tests
         if [ ${#sorted_tests[@]} -gt 10 ]; then
           summary+="- _...and $((${#sorted_tests[@]} - 10)) more_
 "
@@ -321,8 +337,7 @@ process_bep() {
 "
 
     # Sort the targets for better readability
-    IFS=$'\n' successful_targets_sorted=($(sort <<<"${successful_targets[*]}"))
-    unset IFS
+    readarray -t successful_targets_sorted < <(printf '%s\n' "${successful_targets[@]}" | sort)
 
     # Show all targets
     for target in "${successful_targets_sorted[@]}"; do
