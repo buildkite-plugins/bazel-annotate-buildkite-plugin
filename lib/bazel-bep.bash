@@ -45,6 +45,12 @@ process_bep() {
   local BEP_FILE="$1"
   local BAZEL_COMMAND="${2:-}"
 
+  # Ensure the file exists
+  if [[ ! -f "$BEP_FILE" ]]; then
+    echo "Error: BEP file does not exist: $BEP_FILE"
+    return 1
+  fi
+
   # Count of target statuses
   local success_count=0
   local fail_count=0
@@ -69,9 +75,15 @@ process_bep() {
   echo "Processing BEP file: $BEP_FILE"
 
   # Parse the JSON stream
-  while read -r line; do
-    # Skip empty lines or invalid JSON
-    if [ -z "$line" ] || ! echo "$line" | jq -e '.' > /dev/null 2>&1; then
+  while read -r line || [[ -n "$line" ]]; do
+    # Skip empty lines
+    if [ -z "$line" ]; then
+      continue
+    fi
+
+    # Try to parse as JSON, but continue on errors
+    if ! echo "$line" | jq -e '.' > /dev/null 2>&1; then
+      echo "Warning: Skipping invalid JSON line: ${line:0:50}..."
       continue
     fi
 
@@ -303,4 +315,7 @@ process_bep() {
 
   # Create the annotation
   create_annotation "$style" "$summary"
+
+  # Always return success after processing
+  return 0
 }
