@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-PLUGIN_PREFIX="BAZEL_BEP_ANNOTATOR"
+PLUGIN_PREFIX="BAZEL_BEP_ANNOTATE"
 
 # Reads either a value or a list from the given env prefix
 function prefix_read_list() {

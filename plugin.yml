@@ -1,4 +1,4 @@
-name: Bazel BEP Annotator
+name: Bazel BEP Annotate
 description: Creates Buildkite annotations from Bazel Event Protocol output
 author: https://github.com/buildkite-plugins
 requirements:

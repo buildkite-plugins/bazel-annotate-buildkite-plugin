@@ -8,7 +8,7 @@ setup() {
 
   # Setup environment
   export BUILDKITE=true
-  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATOR_SKIP_IF_NO_BEP=false
+  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATE_SKIP_IF_NO_BEP=false
 
   # Mock the process_bep function to avoid relying on external tools
   cat > "$TEMP_DIR/mock-bazel-bep.bash" << 'EOF'
@@ -134,7 +134,7 @@ teardown() {
 
 @test "Skip when no BEP file and skip option is enabled" {
   # No BEP file, but we'll enable skip option
-  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATOR_SKIP_IF_NO_BEP=true
+  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATE_SKIP_IF_NO_BEP=true
 
   # Ensure no common files exist
   rm -f "${BUILDKITE_BUILD_CHECKOUT_PATH:-$PWD}/bazel-events.json" || true
@@ -149,7 +149,7 @@ teardown() {
 
 @test "Fail when no BEP file and skip option is disabled" {
   # No BEP file, skip option disabled
-  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATOR_SKIP_IF_NO_BEP=false
+  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATE_SKIP_IF_NO_BEP=false
 
   # Ensure no common files exist
   rm -f "${BUILDKITE_BUILD_CHECKOUT_PATH:-$PWD}/bazel-events.json" || true
@@ -165,7 +165,7 @@ teardown() {
 @test "Process BEP file when explicitly provided" {
   # Create a sample BEP file
   touch "$TEMP_DIR/sample.bep"
-  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATOR_BEP_FILE="$TEMP_DIR/sample.bep"
+  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATE_BEP_FILE="$TEMP_DIR/sample.bep"
 
   run "$TEMP_DIR/hooks/post-command"
 
@@ -176,7 +176,7 @@ teardown() {
 @test "Detect BEP file from Bazel command" {
   # Create a sample BEP file
   touch "$TEMP_DIR/detected.bep"
-  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATOR_BAZEL_COMMAND="bazel build //... --build_event_json_file=$TEMP_DIR/detected.bep"
+  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATE_BAZEL_COMMAND="bazel build //... --build_event_json_file=$TEMP_DIR/detected.bep"
 
   run "$TEMP_DIR/hooks/post-command"
 
@@ -202,8 +202,8 @@ teardown() {
 
 @test "Skip when BEP file doesn't exist and skip is enabled" {
   # Reference a non-existent BEP file with skip enabled
-  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATOR_BEP_FILE="$TEMP_DIR/nonexistent.bep"
-  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATOR_SKIP_IF_NO_BEP=true
+  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATE_BEP_FILE="$TEMP_DIR/nonexistent.bep"
+  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATE_SKIP_IF_NO_BEP=true
 
   run "$TEMP_DIR/hooks/post-command"
 
