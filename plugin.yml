@@ -9,8 +9,6 @@ configuration:
   properties:
     bep_file:
       type: string
-    bazel_command:
-      type: string
     skip_if_no_bep:
       type: boolean
   additionalProperties: false

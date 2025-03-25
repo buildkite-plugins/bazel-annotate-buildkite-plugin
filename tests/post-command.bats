@@ -17,7 +17,6 @@ setup() {
 
 process_bep() {
   local BEP_FILE="$1"
-  local BAZEL_COMMAND="${2:-}"
 
   echo "Mock processing BEP file: $BEP_FILE"
   if [[ -f "$BEP_FILE" ]]; then
@@ -60,27 +59,9 @@ LIB_DIR="$(cd "$DIR/../lib" && pwd)"
 
 # Get plugin configuration
 BEP_FILE=$(plugin_read_config BEP_FILE "")
-BAZEL_COMMAND=$(plugin_read_config BAZEL_COMMAND "")
 
 # Check if we should skip if no BEP file found
 SKIP_IF_NO_BEP=$(plugin_read_config SKIP_IF_NO_BEP "false")
-
-# Check for automatic BEP file detection based on Bazel command
-if [[ -z "${BEP_FILE}" && -n "${BAZEL_COMMAND}" ]]; then
-  # Try to extract the BEP file from the command if it was specified
-  if [[ "${BAZEL_COMMAND}" =~ --build_event_json_file=([^ ]+) ]]; then
-    BEP_FILE="${BASH_REMATCH[1]}"
-    echo "Detected BEP file from Bazel command: ${BEP_FILE}"
-  else
-    # No BEP file specified in command, check if skip is enabled
-    if [[ "${SKIP_IF_NO_BEP}" == "true" ]]; then
-      echo "No BEP file found in command and skip_if_no_bep is true, skipping annotation"
-      exit 0
-    fi
-    echo "Error: No BEP file found in command"
-    exit 1
-  fi
-fi
 
 # If we still don't have a BEP file, check if it exists at common locations
 if [[ -z "${BEP_FILE}" ]]; then
@@ -123,7 +104,7 @@ if [[ ! -f "${BEP_FILE}" ]]; then
 fi
 
 # Process the BEP file and create the annotation
-process_bep "${BEP_FILE}" "${BAZEL_COMMAND}"
+process_bep "${BEP_FILE}"
 EOF
   chmod +x "$TEMP_DIR/hooks/post-command"
 }
@@ -173,17 +154,7 @@ teardown() {
   assert_output --partial "Mock processing BEP file: $TEMP_DIR/sample.bep"
 }
 
-@test "Detect BEP file from Bazel command" {
-  # Create a sample BEP file
-  touch "$TEMP_DIR/detected.bep"
-  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATE_BAZEL_COMMAND="bazel build //... --build_event_json_file=$TEMP_DIR/detected.bep"
-
-  run "$TEMP_DIR/hooks/post-command"
-
-  assert_success
-  assert_output --partial "Detected BEP file from Bazel command: $TEMP_DIR/detected.bep"
-  assert_output --partial "Mock processing BEP file: $TEMP_DIR/detected.bep"
-}
+# Removed test for bazel_command since we removed that functionality
 
 @test "Find BEP file at common location" {
   # Create sample BEP file at a common location

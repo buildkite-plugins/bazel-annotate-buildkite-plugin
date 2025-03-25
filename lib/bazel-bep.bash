@@ -43,7 +43,6 @@ create_annotation() {
 # Process the BEP file to extract useful information
 process_bep() {
   local BEP_FILE="$1"
-  local BAZEL_COMMAND="${2:-}"
 
   # Ensure the file exists
   if [[ ! -f "$BEP_FILE" ]]; then
@@ -225,9 +224,9 @@ process_bep() {
   # Clean header for the output
   local summary="## 🚀 Bazel Results\n\n"
 
-  # Add command used
-  if [ -n "$BAZEL_COMMAND" ]; then
-    summary+="**🏃 Command:** \`$BAZEL_COMMAND\`\n\n"
+  # Add command used if running in Buildkite
+  if [ -n "${BUILDKITE_COMMAND:-}" ]; then
+    summary+="**🏃 Command:** \`${BUILDKITE_COMMAND}\`\n\n"
   fi
 
   if [ $total_build_time -gt 0 ]; then

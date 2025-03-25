@@ -10,27 +10,9 @@ DIR="$(cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd)"
 
 # Get plugin configuration
 BEP_FILE=$(plugin_read_config BEP_FILE "")
-BAZEL_COMMAND=$(plugin_read_config BAZEL_COMMAND "")
 
 # Check if we should skip if no BEP file found
 SKIP_IF_NO_BEP=$(plugin_read_config SKIP_IF_NO_BEP "false")
-
-# Check for automatic BEP file detection based on Bazel command
-if [[ -z "${BEP_FILE}" && -n "${BAZEL_COMMAND}" ]]; then
-  # Try to extract the BEP file from the command if it was specified
-  if [[ "${BAZEL_COMMAND}" =~ --build_event_json_file=([^ ]+) ]]; then
-    BEP_FILE="${BASH_REMATCH[1]}"
-    echo "Detected BEP file from Bazel command: ${BEP_FILE}"
-  else
-    # No BEP file specified in command, check if skip is enabled
-    if [[ "${SKIP_IF_NO_BEP}" == "true" ]]; then
-      echo "No BEP file found in command and skip_if_no_bep is true, skipping annotation"
-      exit 0
-    fi
-    echo "Error: No BEP file found in command"
-    exit 1
-  fi
-fi
 
 # If we still don't have a BEP file, check if it exists at common locations
 if [[ -z "${BEP_FILE}" ]]; then
@@ -73,7 +55,7 @@ if [[ ! -f "${BEP_FILE}" ]]; then
 fi
 
 # Process the BEP file and create the annotation
-process_bep "${BEP_FILE}" "${BAZEL_COMMAND}" || {
+process_bep "${BEP_FILE}" || {
   status=$?
   echo "Warning: BEP processing returned non-zero status ($status)"
   if [[ "${SKIP_IF_NO_BEP}" == "true" ]]; then

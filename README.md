@@ -10,7 +10,7 @@ A Buildkite plugin that creates rich annotations from Bazel Event Protocol (BEP)
 - ✅ Displays build status with success/failure counts
 - ⏱️ Shows test durations and highlights slow tests
 - ❌ Provides detailed failure information with error logs
-- 🔄 Automatically detects BEP files based on Bazel commands
+- 🔄 Automatically detects BEP files at common locations
 - 💡 Includes random developer wisdom quotes for inspiration
 
 ## Prerequisites
@@ -24,13 +24,7 @@ This plugin requires:
 
 ### `bep_file` (optional)
 
-Path to the Bazel Event Protocol JSON file to parse. If not provided, the plugin will attempt to:
-1. Extract it from the `bazel_command` if provided
-2. Look for files at common locations (bazel-events.json, bazel-bep.json, bep.json)
-
-### `bazel_command` (optional)
-
-The original Bazel command that was run. This is used for display purposes and can also be used to extract the BEP file path if it contains a `--build_event_json_file` flag.
+Path to the Bazel Event Protocol JSON file to parse. If not provided, the plugin will look for files at common locations (bazel-events.json, bazel-bep.json, bep.json).
 
 ### `skip_if_no_bep` (optional, boolean)
 
@@ -51,17 +45,6 @@ steps:
           bep_file: bazel-events.json
 ```
 
-### Automatic BEP detection from Bazel command
-
-```yaml
-steps:
-  - label: "🔨 Build with Bazel"
-    command: |
-      bazel build //... --build_event_json_file=bazel-events.json
-    plugins:
-      - bazel-bep-annotate#v1.0.0:
-          bazel_command: "bazel build //... --build_event_json_file=bazel-events.json"
-```
 
 ### Skip annotations if no BEP file found
 
