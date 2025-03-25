@@ -22,12 +22,12 @@ if [[ -z "${BEP_FILE}" && -n "${BAZEL_COMMAND}" ]]; then
     BEP_FILE="${BASH_REMATCH[1]}"
     echo "Detected BEP file from Bazel command: ${BEP_FILE}"
   else
-    # No BEP file specified in command, need to check if skip is enabled
+    # No BEP file specified in command, check if skip is enabled
     if [[ "${SKIP_IF_NO_BEP}" == "true" ]]; then
-      echo "No BEP file found and skip_if_no_bep is true, skipping annotation"
+      echo "No BEP file found in command and skip_if_no_bep is true, skipping annotation"
       exit 0
     fi
-    echo "Warning: No BEP file specified and couldn't detect one from Bazel command"
+    echo "Error: No BEP file found in command"
     exit 1
   fi
 fi
@@ -40,7 +40,7 @@ if [[ -z "${BEP_FILE}" ]]; then
     "${BUILDKITE_BUILD_CHECKOUT_PATH:-$PWD}/bazel-bep.json"
     "${BUILDKITE_BUILD_CHECKOUT_PATH:-$PWD}/bep.json"
   )
-  
+
   for location in "${COMMON_LOCATIONS[@]}"; do
     if [[ -f "$location" ]]; then
       BEP_FILE="$location"
@@ -50,16 +50,36 @@ if [[ -z "${BEP_FILE}" ]]; then
   done
 fi
 
-# Exit if no BEP file found after all attempts
-if [[ -z "${BEP_FILE}" || ! -f "${BEP_FILE}" ]]; then
+# Check if we have a BEP file
+if [[ -z "${BEP_FILE}" ]]; then
   if [[ "${SKIP_IF_NO_BEP}" == "true" ]]; then
-    echo "No valid BEP file found and skip_if_no_bep is true, skipping annotation"
+    echo "No BEP file specified and skip_if_no_bep is true, skipping annotation"
     exit 0
   else
-    echo "Error: No valid BEP file found"
+    echo "Error: No BEP file specified"
+    exit 1
+  fi
+fi
+
+# Check if the BEP file exists
+if [[ ! -f "${BEP_FILE}" ]]; then
+  if [[ "${SKIP_IF_NO_BEP}" == "true" ]]; then
+    echo "BEP file not found at '${BEP_FILE}' and skip_if_no_bep is true, skipping annotation"
+    exit 0
+  else
+    echo "Error: BEP file not found at '${BEP_FILE}'"
     exit 1
   fi
 fi
 
 # Process the BEP file and create the annotation
-process_bep "${BEP_FILE}" "${BAZEL_COMMAND}"
+process_bep "${BEP_FILE}" "${BAZEL_COMMAND}" || {
+  status=$?
+  echo "Warning: BEP processing returned non-zero status ($status)"
+  if [[ "${SKIP_IF_NO_BEP}" == "true" ]]; then
+    echo "skip_if_no_bep is true, ignoring error"
+    exit 0
+  else
+    exit $status
+  fi
+}
