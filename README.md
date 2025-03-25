@@ -2,7 +2,7 @@
 
 A Buildkite plugin that creates rich annotations from Bazel Event Protocol (BEP) output files, providing at-a-glance build status, test results, and performance information.
 
-![Build status](https://badge.buildkite.com/d673030645c7f3e7e397affddd97cfe9f93a40547ed17b6dc5.svg)
+[![Build status](https://badge.buildkite.com/187db7a75149ed820918944d3486e1ab4b240621bec6523286.svg)](https://buildkite.com/no-assembly/bazel-annotate-buildkite-plugin)
 
 ## Features
 
