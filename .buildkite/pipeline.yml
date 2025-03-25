@@ -8,7 +8,7 @@ steps:
   - label: ":sparkles: Lint"
     plugins:
       - plugin-linter#v3.3.0:
-          id: bazel-annotate
+          id: mcncl/bazel-annotate
 
   - label: ":shell: Shellcheck"
     plugins:
