@@ -1,6 +1,6 @@
 name: Bazel BEP Annotate
 description: Creates Buildkite annotations from Bazel Event Protocol output
-author: https://github.com/buildkite-plugins
+author: https://github.com/mcncl
 requirements:
   - bash
   - jq
