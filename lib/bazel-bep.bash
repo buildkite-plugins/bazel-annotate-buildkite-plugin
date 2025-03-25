@@ -103,6 +103,7 @@ process_bep() {
       label=$(echo "$line" | jq -r '.id.targetCompleted.label // "unknown"')
       local success
       success=$(echo "$line" | jq -r '.completed.success // "false"')
+      # shellcheck disable=SC2034
       local is_cached=false
 
       # Check if the target was cached
@@ -290,6 +291,7 @@ process_bep() {
     # First sort the tests by duration (longest first)
     # sorted_indexes is kept for potential future implementation of index tracking
     # or for maintaining references to original array positions
+    # shellcheck disable=SC2034
     local sorted_indexes=()
     local sorted_times=()
     local sorted_tests=()
