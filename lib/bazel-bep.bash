@@ -386,14 +386,7 @@ $failure_details</details>
 "
   fi
 
-  # Add random inspirational quote
-  summary+="
----
-
-💡 **Random Dev Wisdom:**
-
-_$(get_random_quote)_
-"
+  # Dev wisdom quote removed to avoid duplication in appended annotations
 
   # Create the annotation
   create_annotation "$style" "$summary"
