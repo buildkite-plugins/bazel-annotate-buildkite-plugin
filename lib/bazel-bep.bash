@@ -274,10 +274,10 @@ process_bep() {
     status_emoji="⏭️"
   fi
 
-  # Use job-specific header with right-aligned Bazel emoji
+  # Use job-specific header 
   local job_label="${BUILDKITE_LABEL:-Bazel Results}"
-  # Use a markdown heading with the emoji in a right-aligned markdown table cell
-  local summary="### ${job_label} \`→\` :bazel:
+  # Simple, clean job header
+  local summary="### ${job_label}
 
 "
   # Add command used if running in Buildkite
@@ -387,8 +387,12 @@ $failure_details</details>
 "
   fi
 
-  # Add a blank line at the end for better spacing between appended annotations
+  # Add extra spacing between appended annotations for better readability
   summary+="
+
+
+---
+
 
 "
 
