@@ -1,7 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-PLUGIN_PREFIX="BAZEL_BEP_ANNOTATE"
+# The environment variables set by Buildkite don't include "BEP" in the prefix
+PLUGIN_PREFIX="BAZEL_ANNOTATE"
 
 # Reads either a value or a list from the given env prefix
 function prefix_read_list() {
@@ -56,28 +57,7 @@ function plugin_read_list_into_result() {
 
 # Reads a single value
 function plugin_read_config() {
-  local key="${1}"
+  local var="BUILDKITE_PLUGIN_${PLUGIN_PREFIX}_${1}"
   local default="${2:-}"
-  local var="BUILDKITE_PLUGIN_${PLUGIN_PREFIX}_${key}"
-  
-  # Debug logging
-  echo "DEBUG: Looking for env var: ${var}"
-  echo "DEBUG: Current value: ${!var:-<not set>}"
-  
-  # Also check alternative case formats (this is the fix)
-  if [[ -z "${!var:-}" ]]; then
-    # Try lowercase version
-    local lowercase_key=$(echo "${key}" | tr '[:upper:]' '[:lower:]')
-    local lowercase_var="BUILDKITE_PLUGIN_${PLUGIN_PREFIX}_${lowercase_key}"
-    echo "DEBUG: Also trying lowercase: ${lowercase_var}"
-    echo "DEBUG: Lowercase value: ${!lowercase_var:-<not set>}"
-    
-    if [[ -n "${!lowercase_var:-}" ]]; then
-      echo "DEBUG: Using lowercase variant: ${!lowercase_var}"
-      echo "${!lowercase_var}"
-      return
-    fi
-  fi
-  
   echo "${!var:-$default}"
 }
