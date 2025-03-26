@@ -274,8 +274,9 @@ process_bep() {
     status_emoji="⏭️"
   fi
 
-  # Clean header for the output
-  local summary="## 🚀 Bazel Results
+  # Use job-specific header with Bazel emoji and job label
+  local job_label="${BUILDKITE_LABEL:-Bazel Results}"
+  local summary="### :bazel: ${job_label}
 
 "
   # Add command used if running in Buildkite
