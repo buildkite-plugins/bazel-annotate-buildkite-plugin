@@ -386,7 +386,10 @@ $failure_details</details>
 "
   fi
 
-  # Dev wisdom quote removed to avoid duplication in appended annotations
+  # Add a blank line at the end for better spacing between appended annotations
+  summary+="
+
+"
 
   # Create the annotation
   create_annotation "$style" "$summary"
