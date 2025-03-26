@@ -3,13 +3,19 @@ set -euo pipefail
 
 DIR="$(cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd)"
 
+echo "DEBUG: Current directory: $(pwd)"
+echo "DEBUG: Listing environment variables related to BEP:"
+env | grep -i "BAZEL\|BEP" || true
+
 # shellcheck source=lib/plugin.bash
 . "$DIR/../lib/plugin.bash"
 # shellcheck source=lib/bazel-bep.bash
 . "$DIR/../lib/bazel-bep.bash"
 
 # Get plugin configuration
+echo "DEBUG: About to read BEP_FILE config"
 BEP_FILE=$(plugin_read_config BEP_FILE "")
+echo "DEBUG: BEP_FILE value after reading config: '${BEP_FILE}'"
 
 # Check if we should skip if no BEP file found
 SKIP_IF_NO_BEP=$(plugin_read_config SKIP_IF_NO_BEP "false")
