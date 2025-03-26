@@ -21,6 +21,8 @@ process_bep() {
   echo "Mock processing BEP file: $BEP_FILE"
   if [[ -f "$BEP_FILE" ]]; then
     echo "Mock BEP file exists, processing successful"
+    # Call create_annotation after successful processing
+    create_annotation "info" "This is a mock summary"
     return 0
   else
     echo "Mock BEP file does not exist"
@@ -31,7 +33,7 @@ process_bep() {
 create_annotation() {
   local style="$1"
   local content="$2"
-  echo "Mock annotation created with style: $style"
+  echo "Mock annotation created with style: $style and append flag enabled"
 }
 EOF
 
@@ -180,4 +182,15 @@ teardown() {
 
   assert_success
   assert_output --partial "BEP file not found at '$TEMP_DIR/nonexistent.bep' and skip_if_no_bep is true"
+}
+
+@test "Verify annotations are created with append flag" {
+  # Create a sample BEP file
+  touch "$TEMP_DIR/sample.bep"
+  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATE_BEP_FILE="$TEMP_DIR/sample.bep"
+
+  run "$TEMP_DIR/hooks/post-command"
+
+  assert_success
+  assert_output --partial "Mock annotation created with style: info and append flag enabled"
 }

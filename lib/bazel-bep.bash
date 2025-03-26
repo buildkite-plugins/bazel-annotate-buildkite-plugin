@@ -31,9 +31,9 @@ create_annotation() {
 
   # Check if we're running in Buildkite
   if [ -n "${BUILDKITE:-}" ] && command -v buildkite-agent >/dev/null 2>&1; then
-    echo "Creating Buildkite annotation..."
+    echo "Appending to Buildkite annotation..."
     # Use printf to ensure newlines are properly interpreted
-    printf "%s" "$content" | buildkite-agent annotate --style "$style" --context "$context_id"
+    printf "%s" "$content" | buildkite-agent annotate --style "$style" --context "$context_id" --append
   else
     # We're not in Buildkite, just display the content on stdout
     echo "Not running in Buildkite. Would create annotation with style '$style':"
