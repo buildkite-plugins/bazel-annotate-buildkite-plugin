@@ -26,6 +26,7 @@ steps:
     plugins:
       - bazel-annotate#${BUILDKITE_BRANCH}:
           bep_file: bazel-test1.json
+          skip_if_no_bep: true
           
   - label: ":merge: Test annotation append - Job 2"
     command: |
@@ -36,6 +37,7 @@ steps:
     plugins:
       - bazel-annotate#${BUILDKITE_BRANCH}:
           bep_file: bazel-test2.json
+          skip_if_no_bep: true
           
   - label: ":merge: Test annotation append - Job 3"
     command: |
@@ -46,3 +48,4 @@ steps:
     plugins:
       - bazel-annotate#${BUILDKITE_BRANCH}:
           bep_file: bazel-test3.json
+          skip_if_no_bep: true
