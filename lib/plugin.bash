@@ -1,7 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-PLUGIN_PREFIX="BAZEL_BEP_ANNOTATE"
+# The environment variables set by Buildkite don't include "BEP" in the prefix
+PLUGIN_PREFIX="BAZEL_ANNOTATE"
 
 # Reads either a value or a list from the given env prefix
 function prefix_read_list() {

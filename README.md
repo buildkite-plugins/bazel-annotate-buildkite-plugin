@@ -86,12 +86,39 @@ steps:
           bep_file: my-workspace/bazel-events.json
 ```
 
+### Multiple Bazel jobs in a pipeline with consolidated annotations
+
+```yaml
+steps:
+  - label: "🔨 Build with Bazel"
+    command: |
+      bazel build //... --build_event_json_file=bazel-build-events.json
+    plugins:
+      - bazel-annotate#v0.1.0:
+          bep_file: bazel-build-events.json
+          
+  - label: "🧪 Test with Bazel"
+    command: |
+      bazel test //... --build_event_json_file=bazel-test-events.json
+    plugins:
+      - bazel-annotate#v0.1.0:
+          bep_file: bazel-test-events.json
+          
+  - label: "📦 Package with Bazel"
+    command: |
+      bazel run //:package --build_event_json_file=bazel-package-events.json
+    plugins:
+      - bazel-annotate#v0.1.0:
+          bep_file: bazel-package-events.json
+```
+
 ## How It Works
 
 1. After your Bazel command runs, the plugin looks for the BEP file
 2. It parses the BEP data to extract build status, test results, and performance metrics
 3. It creates a detailed Buildkite annotation with this information
 4. The annotation shows success/failure status, test performance, and detailed error logs
+5. Multiple plugin usages in a pipeline will append to the same annotation, allowing for consolidated build information
 
 ## Troubleshooting
 

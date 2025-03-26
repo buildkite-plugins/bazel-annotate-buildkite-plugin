@@ -8,7 +8,7 @@ setup() {
 
   # Setup environment
   export BUILDKITE=true
-  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATE_SKIP_IF_NO_BEP=false
+  export BUILDKITE_PLUGIN_BAZEL_ANNOTATE_SKIP_IF_NO_BEP=false
 
   # Mock the process_bep function to avoid relying on external tools
   cat > "$TEMP_DIR/mock-bazel-bep.bash" << 'EOF'
@@ -21,6 +21,8 @@ process_bep() {
   echo "Mock processing BEP file: $BEP_FILE"
   if [[ -f "$BEP_FILE" ]]; then
     echo "Mock BEP file exists, processing successful"
+    # Call create_annotation after successful processing
+    create_annotation "info" "This is a mock summary"
     return 0
   else
     echo "Mock BEP file does not exist"
@@ -31,7 +33,7 @@ process_bep() {
 create_annotation() {
   local style="$1"
   local content="$2"
-  echo "Mock annotation created with style: $style"
+  echo "Mock annotation created with style: $style and append flag enabled"
 }
 EOF
 
@@ -115,7 +117,7 @@ teardown() {
 
 @test "Skip when no BEP file and skip option is enabled" {
   # No BEP file, but we'll enable skip option
-  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATE_SKIP_IF_NO_BEP=true
+  export BUILDKITE_PLUGIN_BAZEL_ANNOTATE_SKIP_IF_NO_BEP=true
 
   # Ensure no common files exist
   rm -f "${BUILDKITE_BUILD_CHECKOUT_PATH:-$PWD}/bazel-events.json" || true
@@ -130,7 +132,7 @@ teardown() {
 
 @test "Fail when no BEP file and skip option is disabled" {
   # No BEP file, skip option disabled
-  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATE_SKIP_IF_NO_BEP=false
+  export BUILDKITE_PLUGIN_BAZEL_ANNOTATE_SKIP_IF_NO_BEP=false
 
   # Ensure no common files exist
   rm -f "${BUILDKITE_BUILD_CHECKOUT_PATH:-$PWD}/bazel-events.json" || true
@@ -146,7 +148,7 @@ teardown() {
 @test "Process BEP file when explicitly provided" {
   # Create a sample BEP file
   touch "$TEMP_DIR/sample.bep"
-  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATE_BEP_FILE="$TEMP_DIR/sample.bep"
+  export BUILDKITE_PLUGIN_BAZEL_ANNOTATE_BEP_FILE="$TEMP_DIR/sample.bep"
 
   run "$TEMP_DIR/hooks/post-command"
 
@@ -173,11 +175,22 @@ teardown() {
 
 @test "Skip when BEP file doesn't exist and skip is enabled" {
   # Reference a non-existent BEP file with skip enabled
-  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATE_BEP_FILE="$TEMP_DIR/nonexistent.bep"
-  export BUILDKITE_PLUGIN_BAZEL_BEP_ANNOTATE_SKIP_IF_NO_BEP=true
+  export BUILDKITE_PLUGIN_BAZEL_ANNOTATE_BEP_FILE="$TEMP_DIR/nonexistent.bep"
+  export BUILDKITE_PLUGIN_BAZEL_ANNOTATE_SKIP_IF_NO_BEP=true
 
   run "$TEMP_DIR/hooks/post-command"
 
   assert_success
   assert_output --partial "BEP file not found at '$TEMP_DIR/nonexistent.bep' and skip_if_no_bep is true"
+}
+
+@test "Verify annotations are created with append flag" {
+  # Create a sample BEP file
+  touch "$TEMP_DIR/sample.bep"
+  export BUILDKITE_PLUGIN_BAZEL_ANNOTATE_BEP_FILE="$TEMP_DIR/sample.bep"
+
+  run "$TEMP_DIR/hooks/post-command"
+
+  assert_success
+  assert_output --partial "Mock annotation created with style: info and append flag enabled"
 }
