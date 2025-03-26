@@ -24,7 +24,7 @@ steps:
       echo '{"id":{"buildFinished":{}}, "buildFinished":{"finishTimeMillis":1234567890100}}' >> bazel-test1.json
       echo '{"id":{"targetCompleted":{"label":"//test1:target1"}}, "completed":{"success":true}}' >> bazel-test1.json
     plugins:
-      - ${BUILDKITE_REPO_OWNER:-mcncl}/bazel-annotate${BUILDKITE_COMMIT:+@$BUILDKITE_COMMIT}:
+      - bazel-annotate#${BUILDKITE_BRANCH}:
           bep_file: bazel-test1.json
           
   - label: ":merge: Test annotation append - Job 2"
@@ -34,7 +34,7 @@ steps:
       echo '{"id":{"buildFinished":{}}, "buildFinished":{"finishTimeMillis":1234567890300}}' >> bazel-test2.json
       echo '{"id":{"targetCompleted":{"label":"//test2:target2"}}, "completed":{"success":true}}' >> bazel-test2.json
     plugins:
-      - ${BUILDKITE_REPO_OWNER:-mcncl}/bazel-annotate${BUILDKITE_COMMIT:+@$BUILDKITE_COMMIT}:
+      - bazel-annotate#${BUILDKITE_BRANCH}:
           bep_file: bazel-test2.json
           
   - label: ":merge: Test annotation append - Job 3"
@@ -44,5 +44,5 @@ steps:
       echo '{"id":{"buildFinished":{}}, "buildFinished":{"finishTimeMillis":1234567890500}}' >> bazel-test3.json
       echo '{"id":{"targetCompleted":{"label":"//test3:target3"}}, "completed":{"success":true}}' >> bazel-test3.json
     plugins:
-      - ${BUILDKITE_REPO_OWNER:-mcncl}/bazel-annotate${BUILDKITE_COMMIT:+@$BUILDKITE_COMMIT}:
+      - bazel-annotate#${BUILDKITE_BRANCH}:
           bep_file: bazel-test3.json
