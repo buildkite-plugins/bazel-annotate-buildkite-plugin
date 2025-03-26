@@ -28,12 +28,35 @@ create_annotation() {
   local style="$1"
   local content="$2"
   local context_id="bazel-bep-results"
+  local job_name="${BUILDKITE_LABEL:-Unknown Job}"
+  local is_first_job="${BUILDKITE_PLUGIN_BAZEL_ANNOTATE_IS_FIRST_JOB:-true}"
 
   # Check if we're running in Buildkite
   if [ -n "${BUILDKITE:-}" ] && command -v buildkite-agent >/dev/null 2>&1; then
-    echo "Appending to Buildkite annotation..."
+    # Modify content based on whether this is the first job
+    if [ "$is_first_job" != "true" ]; then
+      # If not the first job, add a job section instead of the main header
+      echo "Appending to existing Buildkite annotation..."
+      
+      # Replace the main header with a job-specific header or remove it
+      content=$(echo "$content" | sed '1,3d') # Remove the first 3 lines (header + blank line)
+      
+      # Add job-specific section header
+      content="### 🧩 ${job_name}\n\n${content}"
+    else
+      echo "Creating initial Buildkite annotation with header..."
+    fi
+    
     # Use printf to ensure newlines are properly interpreted
     printf "%s" "$content" | buildkite-agent annotate --style "$style" --context "$context_id" --append
+    
+    # Signal to future jobs that they're not the first
+    if buildkite-agent meta-data exists "bazel-annotate-header-created" 2>/dev/null; then
+      echo "Header already marked as created in metadata"
+    else
+      echo "Setting metadata to indicate header has been created"
+      buildkite-agent meta-data set "bazel-annotate-header-created" "true" || true
+    fi
   else
     # We're not in Buildkite, just display the content on stdout
     echo "Not running in Buildkite. Would create annotation with style '$style':"

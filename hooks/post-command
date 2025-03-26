@@ -14,6 +14,18 @@ BEP_FILE=$(plugin_read_config BEP_FILE "")
 # Check if we should skip if no BEP file found
 SKIP_IF_NO_BEP=$(plugin_read_config SKIP_IF_NO_BEP "false")
 
+# Check if this is the first job to create the annotation
+# Only do this check if we're running in Buildkite
+if [ -n "${BUILDKITE:-}" ] && command -v buildkite-agent >/dev/null 2>&1; then
+  if buildkite-agent meta-data exists "bazel-annotate-header-created" 2>/dev/null; then
+    echo "Detected existing annotation header from metadata"
+    export BUILDKITE_PLUGIN_BAZEL_ANNOTATE_IS_FIRST_JOB="false"
+  else
+    echo "This appears to be the first job creating an annotation"
+    export BUILDKITE_PLUGIN_BAZEL_ANNOTATE_IS_FIRST_JOB="true"
+  fi
+fi
+
 # If we still don't have a BEP file, check if it exists at common locations
 if [[ -z "${BEP_FILE}" ]]; then
   # Try some common locations
