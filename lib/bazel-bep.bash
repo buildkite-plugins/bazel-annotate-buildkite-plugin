@@ -366,7 +366,7 @@ process_bep() {
 "
 
 if [ ${#successful_targets[@]} -gt 0 ]; then
-    IFS=$'\n' successful_targets_sorted=($(printf '%s\n' "${successful_targets[@]}" | sort))
+  mapfile -t successful_targets_sorted < <(printf '%s\n' "${successful_targets[@]}" | sort)
 fi
 
     # Show all targets
