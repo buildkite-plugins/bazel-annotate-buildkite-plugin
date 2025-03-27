@@ -81,7 +81,7 @@ process_bep() {
   local skip_count=0
   local cached_count=0
 
-  # Arrays for successul targets
+  # Arrays for successful targets
   declare -a successful_targets=()
   declare -a successful_targets_sorted=()
 
