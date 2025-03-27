@@ -83,6 +83,7 @@ process_bep() {
 
   # Arrays for successful targets
   declare -a successful_targets=()
+  declare -a successful_targets_sorted=()
 
   # Arrays for test performance tracking
   declare -a slowest_tests=()
@@ -364,8 +365,9 @@ process_bep() {
 
 "
 
-    # Sort the targets for better readability
-    readarray -t successful_targets_sorted < <(printf '%s\n' "${successful_targets[@]}" | sort)
+if [ ${#successful_targets[@]} -gt 0 ]; then
+  mapfile -t successful_targets_sorted < <(printf '%s\n' "${successful_targets[@]}" | sort)
+fi
 
     # Show all targets
     for target in "${successful_targets_sorted[@]}"; do
