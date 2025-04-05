@@ -1,4 +1,4 @@
-# Bazel BEP Annotate Buildkite Plugin
+# Bazel BEP Annotate Buildkite Plugin [![Build status](https://badge.buildkite.com/522d5a765d9856d57c8ce69162540279b81db9d2852b5f7060.svg?branch=main)](https://buildkite.com/buildkite/plugins-bazel-annotate)
 
 A Buildkite plugin that creates rich annotations from Bazel Event Protocol (BEP) output files, providing at-a-glance build status, test results, and performance information.
 
@@ -41,7 +41,7 @@ steps:
     command: |
       bazel build //... --build_event_json_file=bazel-events.json
     plugins:
-      - bazel-annotate#v0.1.1:
+      - bazel-annotate#v0.1.2:
           bep_file: bazel-events.json
 ```
 
@@ -55,7 +55,7 @@ steps:
       # Command might not produce a BEP file
       bazel build //...
     plugins:
-      - bazel-annotate#v0.1.1:
+      - bazel-annotate#v0.1.2:
           skip_if_no_bep: true
 ```
 
@@ -69,7 +69,7 @@ steps:
     command: |
       bazel test //... --build_event_json_file=bazel-test-events.json
     plugins:
-      - bazel-annotate#v0.1.1:
+      - bazel-annotate#v0.1.2:
           bep_file: bazel-test-events.json
 ```
 
@@ -82,7 +82,7 @@ steps:
       cd my-workspace
       bazel build //... --build_event_json_file=bazel-events.json
     plugins:
-      - bazel-annotate#v0.1.1:
+      - bazel-annotate#v0.1.2:
           bep_file: my-workspace/bazel-events.json
 ```
 
@@ -94,21 +94,21 @@ steps:
     command: |
       bazel build //... --build_event_json_file=bazel-build-events.json
     plugins:
-      - bazel-annotate#v0.1.1:
+      - bazel-annotate#v0.1.2:
           bep_file: bazel-build-events.json
           
   - label: "🧪 Test with Bazel"
     command: |
       bazel test //... --build_event_json_file=bazel-test-events.json
     plugins:
-      - bazel-annotate#v0.1.1:
+      - bazel-annotate#v0.1.2:
           bep_file: bazel-test-events.json
           
   - label: "📦 Package with Bazel"
     command: |
       bazel run //:package --build_event_json_file=bazel-package-events.json
     plugins:
-      - bazel-annotate#v0.1.1:
+      - bazel-annotate#v0.1.2:
           bep_file: bazel-package-events.json
 ```
 
