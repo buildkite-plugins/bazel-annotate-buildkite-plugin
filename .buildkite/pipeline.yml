@@ -1,0 +1,30 @@
+steps:
+  - group: ":test_tube: Tests"
+    steps:
+      - label: ":shell: Tests"
+        plugins:
+          - plugin-tester#v1.1.1:
+              folders:
+                - tests
+      - label: ":bazel: Bazel Tests"
+        agents:
+          queue: mac
+        command: |
+          if command -v bazel &> /dev/null; then
+            bazel test //...
+          else
+            echo "Bazel not found, skipping Bazel tests"
+          fi
+
+  - label: ":sparkles: Lint"
+    plugins:
+      - plugin-linter#v3.3.0:
+          id: bazel-annotate
+
+  - label: ":shell: Shellcheck"
+    plugins:
+      - shellcheck#v1.4.0:
+          files:
+            - hooks/**
+            - lib/**
+

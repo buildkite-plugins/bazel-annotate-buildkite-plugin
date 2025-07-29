@@ -1,0 +1,18 @@
+name: Bazel BEP Annotate
+description: Fast protobuf-based failure analysis from Bazel Event Protocol output
+author: https://github.com/mcncl
+requirements:
+  - bash
+  - python3
+configuration:
+  properties:
+    bep_file:
+      type: string
+      description: "Path to the BEP protobuf file (default: auto-detect)"
+    skip_if_no_bep:
+      type: boolean
+      description: "Skip gracefully if no BEP file found (default: false)"
+    verbose:
+      type: boolean
+      description: "Enable verbose output (default: false)"
+  additionalProperties: false

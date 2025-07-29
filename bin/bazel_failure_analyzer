@@ -1,0 +1,524 @@
+#!/usr/bin/env python3
+"""
+Bazel BEP Failure Analyzer - Standalone Binary
+
+This is a standalone version that can be used directly without Bazel build system.
+"""
+
+import argparse
+import sys
+import os
+import struct
+from typing import List, Dict, Any, Optional
+from pathlib import Path
+import subprocess
+
+
+class BEPAnalyzer:
+    """Analyzes Bazel Build Event Protocol protobuf files for failures."""
+    
+    def __init__(self, verbose: bool = False):
+        self.verbose = verbose
+        self.failures = []
+        
+    def extract_failures(self, bep_file_path: str) -> List[Dict[str, Any]]:
+        """Extract failure information from a BEP protobuf file."""
+        failures = []
+        
+        try:
+            with open(bep_file_path, 'rb') as f:
+                while True:
+                    # Read varint-delimited protobuf messages
+                    message_data = self._read_varint_delimited_message(f)
+                    if not message_data:
+                        break
+                    
+                    # Parse the message for failure events
+                    failure = self._parse_build_event_for_failure(message_data)
+                    if failure:
+                        failures.append(failure)
+                        if self.verbose:
+                            print(f"🔍 Found failure: {failure.get('target', 'Unknown')}")
+                        
+        except Exception as e:
+            if self.verbose:
+                print(f"Warning: Error reading BEP file: {e}")
+            
+        return failures
+    
+    def _read_varint_delimited_message(self, f) -> Optional[bytes]:
+        """Read a varint-delimited protobuf message from file."""
+        # Read the varint length
+        length = self._read_varint(f)
+        if length is None:
+            return None
+            
+        # Read the message data
+        message_data = f.read(length)
+        if len(message_data) != length:
+            return None
+            
+        return message_data
+    
+    def _read_varint(self, f) -> Optional[int]:
+        """Read a varint from file."""
+        value = 0
+        shift = 0
+        
+        while True:
+            byte_data = f.read(1)
+            if not byte_data:
+                return None
+                
+            byte = byte_data[0]
+            value |= (byte & 0x7F) << shift
+            
+            if (byte & 0x80) == 0:
+                break
+                
+            shift += 7
+            if shift >= 64:
+                return None
+                
+        return value
+    
+    def _parse_build_event_for_failure(self, message_data: bytes) -> Optional[Dict[str, Any]]:
+        """Parse a build event message for failure information."""
+        try:
+            # Look for failure indicators in the raw message
+            message_str = message_data.decode('utf-8', errors='ignore')
+            
+            # Pattern matching for actual build failures (be more specific)
+            failure_patterns = [
+                'FAILED_TO_BUILD',
+                'COMPILATION_FAILED', 
+                'TEST_FAILED',
+                'BUILD_FAILED',
+                'FAILED TARGETS',
+                'COMPILATION ERROR',
+                '"status": "FAILED"',  # Test failures
+                'testFailureMessage'   # Test failure messages
+            ]
+            
+            # Only look for failures in specific contexts, not in command-line args
+            if any(pattern in message_str for pattern in failure_patterns):
+                # Additional validation: make sure this looks like an actual failure event
+                # Skip if it looks like command-line arguments or configuration
+                if ('--client_env' in message_str or 
+                    '--default_override' in message_str or
+                    'connect_timeout_secs' in message_str or
+                    'fatal_event_bus_exceptions' in message_str):
+                    return None
+            
+            for pattern in failure_patterns:
+                if pattern in message_str:
+                    return self._extract_failure_details(message_str, pattern)
+                    
+        except Exception as e:
+            if self.verbose:
+                print(f"Warning: Error parsing message: {e}")
+                
+        return None
+    
+    def _extract_failure_details(self, message_str: str, failure_type: str) -> Dict[str, Any]:
+        """Extract failure details from message string."""
+        # Normalize failure type for better display
+        normalized_type = failure_type
+        if failure_type == '"status": "FAILED"':
+            normalized_type = 'TEST_FAILED'
+        elif failure_type == 'testFailureMessage':
+            normalized_type = 'TEST_FAILED'
+            
+        failure = {
+            'type': 'build_failure',
+            'status': normalized_type,
+            'target': 'unknown',
+            'message': '',
+            'file_location': None,
+            'line_number': None
+        }
+        
+        # Try to extract target information with better patterns
+        lines = message_str.split('\n')
+        target_found = False
+        
+        # Look for Bazel target patterns (avoid URLs)
+        target_patterns = [
+            # Full target like //pkg/sub:target - must have colon and valid package chars
+            r'//[a-zA-Z0-9_\-][a-zA-Z0-9_/\-]*:[a-zA-Z0-9_\-]+',
+            # Root target like //:target - colon required  
+            r'//:[a-zA-Z0-9_\-]+',
+        ]
+        
+        import re
+        for line in lines:
+            for pattern in target_patterns:
+                matches = re.findall(pattern, line)
+                if matches:
+                    failure['target'] = matches[0].strip('"\'')
+                    target_found = True
+                    break
+            if target_found:
+                break
+        
+        # If no target found, try simpler patterns (avoid URLs)
+        if not target_found:
+            for line in lines:
+                if '//' in line:
+                    # Look for anything that starts with // but isn't a URL
+                    parts = line.split()
+                    for part in parts:
+                        if part.startswith('//'):
+                            clean_part = part.strip('",;()[]{}')
+                            # Skip URLs (contain dots) and ensure it looks like a target
+                            if (len(clean_part) > 2 and 
+                                '.' not in clean_part and 
+                                not clean_part.startswith('//http') and
+                                not clean_part.startswith('//www')):
+                                failure['target'] = clean_part
+                                target_found = True
+                                break
+                if target_found:
+                    break
+        
+        # Extract file locations and line numbers
+        file_location_patterns = [
+            # Pattern like: "path/to/file.cc:123:45: error message"
+            r'([a-zA-Z0-9_/\-\.]+\.(?:cc|cpp|h|hpp|py|java|go|js|ts|kt|scala|rs|c|C|cxx)):(\d+):(?:\d+:)?\s*(.+)',
+            # Pattern like: "path/to/file.py:42: message" 
+            r'([a-zA-Z0-9_/\-\.]+\.(?:cc|cpp|h|hpp|py|java|go|js|ts|kt|scala|rs|c|C|cxx)):(\d+):\s*(.+)',
+            # BUILD file pattern: "BUILD:15:1: message"
+            r'(BUILD(?:\.bazel)?):(\d+):(?:\d+:)?\s*(.+)',
+            # Workspace file pattern
+            r'(WORKSPACE(?:\.bazel)?):(\d+):(?:\d+:)?\s*(.+)',
+        ]
+        
+        import re
+        for line in lines:
+            for pattern in file_location_patterns:
+                match = re.search(pattern, line)
+                if match:
+                    failure['file_location'] = match.group(1)
+                    failure['line_number'] = int(match.group(2))
+                    # Use the error message from the match if we don't have one
+                    if not failure['message']:
+                        failure['message'] = match.group(3).strip()
+                    break
+            if failure['file_location']:  # Found a file location, stop searching
+                break
+
+        # Extract error message with better filtering (if we don't have one from file location)
+        if not failure['message']:
+            error_lines = []
+            relevant_keywords = ['error', 'failed', 'exception', 'timeout', 'compilation']
+            
+            for line in lines:
+                line_lower = line.lower()
+                if any(word in line_lower for word in relevant_keywords):
+                    # Skip very short or uninformative lines
+                    if len(line.strip()) > 10 and not line.strip().startswith('#'):
+                        error_lines.append(line.strip())
+            
+            if error_lines:
+                failure['message'] = '\n'.join(error_lines[:5])  # Limit to 5 lines
+            elif failure_type in message_str:
+                # Fallback: include the line with the failure type
+                for line in lines:
+                    if failure_type in line and len(line.strip()) > 10:
+                        failure['message'] = line.strip()
+                        break
+        
+        return failure
+
+
+class BuildkiteAnnotator:
+    """Creates Buildkite annotations from failure analysis."""
+    
+    def __init__(self):
+        # Check for Buildkite environment using multiple indicators
+        self.is_buildkite = (
+            os.getenv('BUILDKITE') == 'true' or 
+            os.getenv('BUILDKITE_BUILD_ID') is not None or
+            os.getenv('BUILDKITE_JOB_ID') is not None
+        )
+        
+        # Get repository information for GitHub links
+        self.repo_url = self._get_repo_url()
+        self.commit_sha = self._get_commit_sha()
+        
+    def _get_repo_url(self) -> Optional[str]:
+        """Get the GitHub repository URL."""
+        # Try Buildkite environment first
+        buildkite_repo = os.getenv('BUILDKITE_REPO')
+        if buildkite_repo:
+            # Convert SSH to HTTPS: git@github.com:owner/repo.git -> https://github.com/owner/repo
+            if buildkite_repo.startswith('git@github.com:'):
+                return buildkite_repo.replace('git@github.com:', 'https://github.com/').rstrip('.git')
+            elif buildkite_repo.startswith('https://github.com/'):
+                return buildkite_repo.rstrip('.git')
+        
+        # Fallback: try to get from git remote
+        try:
+            result = subprocess.run(['git', 'remote', 'get-url', 'origin'], 
+                                 capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                remote_url = result.stdout.strip()
+                if remote_url.startswith('git@github.com:'):
+                    return remote_url.replace('git@github.com:', 'https://github.com/').rstrip('.git')
+                elif remote_url.startswith('https://github.com/'):
+                    return remote_url.rstrip('.git')
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+        
+        return None
+    
+    def _get_commit_sha(self) -> str:
+        """Get the current commit SHA."""
+        # Try Buildkite environment first
+        commit = os.getenv('BUILDKITE_COMMIT')
+        if commit:
+            return commit
+            
+        # Try branch if no commit SHA
+        branch = os.getenv('BUILDKITE_BRANCH')
+        if branch:
+            return branch
+            
+        # Fallback: try to get from git
+        try:
+            result = subprocess.run(['git', 'rev-parse', 'HEAD'], 
+                                 capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+            
+        return 'main'  # Default fallback
+    
+    def _create_github_link(self, file_path: str, line_number: Optional[int] = None) -> Optional[str]:
+        """Create a GitHub link to a file and line number."""
+        if not self.repo_url or not file_path:
+            return None
+            
+        # Clean up file path (remove leading ./ or workspace prefixes)
+        clean_path = file_path.lstrip('./')
+        
+        github_url = f"{self.repo_url}/blob/{self.commit_sha}/{clean_path}"
+        
+        if line_number:
+            github_url += f"#L{line_number}"
+            
+        return github_url
+        
+    def create_failure_annotation(self, failures: List[Dict[str, Any]], verbose: bool = False):
+        """Create a focused Buildkite annotation for failures."""
+        if not failures:
+            if verbose:
+                print("No failures to annotate")
+            return
+            
+        # Generate annotation content
+        annotation_content = self._generate_annotation_content(failures)
+        
+        if self.is_buildkite:
+            self._create_buildkite_annotation(annotation_content, verbose)
+        else:
+            # Not in Buildkite, just print the annotation
+            print("=" * 60)
+            print("BUILDKITE ANNOTATION PREVIEW:")
+            print("=" * 60)
+            print(annotation_content)
+            print("=" * 60)
+    
+    def _generate_annotation_content(self, failures: List[Dict[str, Any]]) -> str:
+        """Generate the annotation content."""
+        failure_count = len(failures)
+        
+        content = f"""### 🚨 Build Failures ({failure_count} found)
+
+"""
+        
+        # Group failures by type
+        failure_types = {}
+        for failure in failures:
+            failure_type = failure.get('type', 'unknown')
+            if failure_type not in failure_types:
+                failure_types[failure_type] = []
+            failure_types[failure_type].append(failure)
+        
+        # Display failures by type
+        for failure_type, type_failures in failure_types.items():
+            content += f"#### {self._get_failure_emoji(failure_type)} {failure_type.replace('_', ' ').title()} ({len(type_failures)})\n\n"
+            
+            for failure in type_failures:
+                target = failure.get('target', 'Unknown target')
+                status = failure.get('status', 'FAILED')
+                message = failure.get('message', '')
+                file_location = failure.get('file_location')
+                line_number = failure.get('line_number')
+                
+                content += f"**Target:** `{target}`  \n"
+                content += f"**Status:** {status}  \n"
+                
+                # Add GitHub link if we have file location
+                if file_location:
+                    github_link = self._create_github_link(file_location, line_number)
+                    if github_link:
+                        display_location = f"{file_location}:{line_number}" if line_number else file_location
+                        content += f"**File:** [{display_location}]({github_link})  \n"
+                    else:
+                        display_location = f"{file_location}:{line_number}" if line_number else file_location
+                        content += f"**File:** `{display_location}`  \n"
+                
+                if message:
+                    # Clean up the message
+                    clean_message = self._clean_error_message(message)
+                    content += f"**Error:**\n```\n{clean_message}\n```\n\n"
+                else:
+                    content += "\n"
+        
+        content += "---\n"
+        content += "*Generated by Bazel Failure Analyzer*\n"
+        
+        return content
+    
+    def _get_failure_emoji(self, failure_type: str) -> str:
+        """Get appropriate emoji for failure type."""
+        emoji_map = {
+            'build_failure': '🔨',
+            'test_failure': '🧪',
+            'compilation_failure': '⚙️',
+            'timeout': '⏱️',
+            'unknown': '❓'
+        }
+        return emoji_map.get(failure_type, '❌')
+    
+    def _clean_error_message(self, message: str) -> str:
+        """Clean up error message for display."""
+        # Remove excessive whitespace
+        lines = [line.strip() for line in message.split('\n') if line.strip()]
+        
+        # Limit to reasonable length
+        if len(lines) > 10:
+            lines = lines[:10] + ['... (truncated)']
+        
+        return '\n'.join(lines)
+    
+    def _create_buildkite_annotation(self, content: str, verbose: bool = False):
+        """Create actual Buildkite annotation."""
+        try:
+            # Use step ID as context so each step gets its own annotation
+            context = os.getenv('BUILDKITE_STEP_ID', 'bazel-failures')
+            
+            # Use buildkite-agent to create annotation
+            cmd = [
+                'buildkite-agent', 'annotate',
+                '--style', 'error',
+                '--context', context
+            ]
+            
+            if verbose:
+                print(f"Creating Buildkite annotation with command: {' '.join(cmd)}")
+            
+            result = subprocess.run(
+                cmd,
+                input=content,
+                text=True,
+                capture_output=True,
+                check=True
+            )
+            
+            if verbose:
+                print("✅ Buildkite annotation created successfully")
+                
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Failed to create Buildkite annotation: {e}")
+            if verbose:
+                print(f"stdout: {e.stdout}")
+                print(f"stderr: {e.stderr}")
+        except FileNotFoundError:
+            print("❌ buildkite-agent not found - not running in Buildkite?")
+            if verbose:
+                print("Annotation content would be:")
+                print(content)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Analyze Bazel BEP protobuf files for failures"
+    )
+    parser.add_argument(
+        "bep_file",
+        help="Path to the BEP protobuf file"
+    )
+    parser.add_argument(
+        "--output-format",
+        choices=["buildkite", "json", "text"],
+        default="buildkite",
+        help="Output format (default: buildkite)"
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose output"
+    )
+    parser.add_argument(
+        "--skip-if-no-failures",
+        action="store_true",
+        help="Exit successfully if no failures found"
+    )
+    
+    args = parser.parse_args()
+    
+    # Check if BEP file exists
+    if not os.path.exists(args.bep_file):
+        print(f"❌ Error: BEP file not found: {args.bep_file}", file=sys.stderr)
+        return 1
+    
+    if args.verbose:
+        print(f"🔍 Analyzing BEP file: {args.bep_file}")
+    
+    try:
+        # Initialize analyzer
+        analyzer = BEPAnalyzer(verbose=args.verbose)
+        
+        # Parse BEP file
+        failures = analyzer.extract_failures(args.bep_file)
+        
+        if not failures:
+            if args.verbose:
+                print("✅ No failures found in BEP file")
+            if args.skip_if_no_failures:
+                return 0
+            else:
+                print("✅ Build completed successfully - no failures detected")
+                return 0
+        
+        # Generate output based on format
+        if args.output_format == "buildkite":
+            annotator = BuildkiteAnnotator()
+            annotator.create_failure_annotation(failures, verbose=args.verbose)
+        elif args.output_format == "json":
+            import json
+            print(json.dumps(failures, indent=2))
+        else:  # text
+            print(f"🚨 Found {len(failures)} failures:")
+            for i, failure in enumerate(failures, 1):
+                print(f"\n{i}. {failure.get('target', 'Unknown target')}")
+                print(f"   Type: {failure.get('type', 'Unknown')}")
+                print(f"   Status: {failure.get('status', 'FAILED')}")
+                if failure.get('message'):
+                    print(f"   Message: {failure['message']}")
+        
+        return 1 if failures else 0
+        
+    except Exception as e:
+        print(f"❌ Error analyzing BEP file: {e}", file=sys.stderr)
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

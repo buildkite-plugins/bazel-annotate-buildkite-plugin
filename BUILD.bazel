@@ -1,0 +1,42 @@
+# Use built-in Bazel rules for simplicity
+
+# Plugin configuration test
+sh_test(
+    name = "test_plugin_config",
+    srcs = ["tests/test_plugin_config.sh"],
+    data = [
+        "lib/plugin.bash",
+        "hooks/post-command", 
+        "bin/bazel_failure_analyzer",
+        "plugin.yml",
+    ],
+)
+
+# Analyzer functionality test using shell
+sh_test(
+    name = "test_analyzer_functionality", 
+    srcs = ["tests/test_analyzer_functionality.sh"],
+    data = ["bin/bazel_failure_analyzer"],
+)
+
+# Filegroup for all plugin files
+filegroup(
+    name = "plugin_files",
+    srcs = [
+        "plugin.yml",
+        "hooks/post-command",
+        "lib/plugin.bash",
+        "bin/bazel_failure_analyzer", 
+        "README.md",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Plugin archive for distribution
+genrule(
+    name = "plugin_archive",
+    srcs = [":plugin_files"],
+    outs = ["bazel-annotate-plugin.tar.gz"],
+    cmd = "tar -czf $@ $(SRCS)",
+    visibility = ["//visibility:public"],
+)

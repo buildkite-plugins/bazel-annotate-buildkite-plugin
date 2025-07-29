@@ -1,0 +1,103 @@
+#!/bin/bash
+set -euo pipefail
+
+# Bazel BEP Failure Analyzer Plugin
+# Uses Bazel-built binary for fast protobuf-based failure analysis
+
+DIR="$(cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd)"
+
+# shellcheck source=lib/plugin.bash
+. "$DIR/../lib/plugin.bash"
+
+# Get plugin configuration
+BEP_FILE=$(plugin_read_config BEP_FILE "")
+SKIP_IF_NO_BEP=$(plugin_read_config SKIP_IF_NO_BEP "false")
+VERBOSE=$(plugin_read_config VERBOSE "false")
+
+echo "🔍 Bazel Failure Analyzer - Looking for BEP protobuf file..."
+
+# If no BEP file specified, look for common protobuf locations
+if [[ -z "${BEP_FILE}" ]]; then
+  COMMON_LOCATIONS=(
+    "${BUILDKITE_BUILD_CHECKOUT_PATH:-$PWD}/bazel-events.pb"
+    "${BUILDKITE_BUILD_CHECKOUT_PATH:-$PWD}/bazel-bep.pb"
+    "${BUILDKITE_BUILD_CHECKOUT_PATH:-$PWD}/bep.pb"
+    "${BUILDKITE_BUILD_CHECKOUT_PATH:-$PWD}/events.pb"
+  )
+
+  for location in "${COMMON_LOCATIONS[@]}"; do
+    if [[ -f "$location" ]]; then
+      BEP_FILE="$location"
+      echo "✅ Found BEP protobuf file: ${BEP_FILE}"
+      break
+    fi
+  done
+fi
+
+# Check if we have a BEP file
+if [[ -z "${BEP_FILE}" ]]; then
+  if [[ "${SKIP_IF_NO_BEP}" == "true" ]]; then
+    echo "ℹ️ No BEP protobuf file found, skipping (skip_if_no_bep=true)"
+    exit 0
+  else
+    echo "❌ Error: No BEP protobuf file found"
+    echo "💡 Generate one with: bazel build //... --build_event_binary_file=events.pb"
+    exit 1
+  fi
+fi
+
+# Check if the BEP file exists
+if [[ ! -f "${BEP_FILE}" ]]; then
+  if [[ "${SKIP_IF_NO_BEP}" == "true" ]]; then
+    echo "ℹ️ BEP file not found at '${BEP_FILE}', skipping (skip_if_no_bep=true)"
+    exit 0
+  else
+    echo "❌ Error: BEP file not found at '${BEP_FILE}'"
+    exit 1
+  fi
+fi
+
+# Use the standalone analyzer binary
+ANALYZER_BINARY="$DIR/../bin/bazel_failure_analyzer"
+if [[ ! -f "$ANALYZER_BINARY" ]]; then
+  echo "❌ Analyzer binary not found at: $ANALYZER_BINARY"
+  exit 1
+fi
+
+# Run the analyzer
+echo "⚡ Analyzing BEP file for failures..."
+ANALYZER_ARGS=("$BEP_FILE" "--output-format=buildkite")
+
+if [[ "${VERBOSE}" == "true" ]]; then
+  ANALYZER_ARGS+=("--verbose")
+fi
+
+if [[ "${SKIP_IF_NO_BEP}" == "true" ]]; then
+  ANALYZER_ARGS+=("--skip-if-no-failures")
+fi
+
+# Run the analyzer
+"$ANALYZER_BINARY" "${ANALYZER_ARGS[@]}"
+analyzer_exit_code=$?
+
+case $analyzer_exit_code in
+  0)
+    # No failures found - success (analyzer already printed the message)
+    ;;
+  1)
+    # Failures found - this should fail the build
+    echo "🚨 Build failures detected - failing the build"
+    exit 1
+    ;;
+  *)
+    # Analyzer error (exit code 2+)
+    echo "⚠️ Warning: Analyzer returned error status ($analyzer_exit_code)"
+    if [[ "${SKIP_IF_NO_BEP}" == "true" ]]; then
+      echo "ℹ️ Ignoring analyzer error due to skip_if_no_bep=true"
+      exit 0
+    else
+      echo "❌ Analyzer failed - this might indicate a problem with the BEP file format"
+      echo "⚠️ Continuing with build (analyzer errors don't fail the build)"
+    fi
+    ;;
+esac
