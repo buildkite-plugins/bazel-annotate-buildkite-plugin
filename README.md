@@ -120,15 +120,6 @@ steps:
 - ✅ Full supported
 - 📝 Agents running on Linux or Kubernetes will need to have Bazel made available via installation
 
-
-## ⚒ Developing
-
-You can use the [bk cli](https://github.com/buildkite/cli) to run the plugin locally:
-
-```bash
-bk local run
-```
-
 ## 👩‍💻 Contributing
 
 1. Fork the repository
