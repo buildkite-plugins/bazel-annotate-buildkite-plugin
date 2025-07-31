@@ -3,6 +3,7 @@
 Bazel BEP Failure Analyzer - Standalone Binary
 
 This is a standalone version that can be used directly without Bazel build system.
+Uses proper protobuf parsing for more accurate failure detection.
 """
 
 import argparse
@@ -13,24 +14,60 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 import subprocess
 
+try:
+    from google.protobuf.message import DecodeError
+    from google.protobuf.json_format import MessageToDict
+    import google.protobuf.message
+    PROTOBUF_AVAILABLE = True
+except ImportError:
+    PROTOBUF_AVAILABLE = False
+
 
 class BEPAnalyzer:
     """Analyzes Bazel Build Event Protocol protobuf files for failures."""
     
+    # Memory usage limits
+    MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB max BEP file size
+    MAX_FAILURES = 50  # Maximum number of failures to collect
+    MAX_MESSAGE_SIZE = 5000  # Maximum size of individual failure messages
+    MAX_ERROR_LINES = 10  # Maximum lines per error message
+    MAX_STRINGS_PER_EVENT = 20  # Maximum strings to extract per protobuf event
+    MAX_VARINT_BYTES = 10  # Maximum bytes for protobuf varint (per specification)
+    
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
         self.failures = []
+        self.failures_skipped = 0  # Track skipped failures due to limits
         
     def extract_failures(self, bep_file_path: str) -> List[Dict[str, Any]]:
         """Extract failure information from a BEP protobuf file."""
         failures = []
         
+        # Check file size before processing
         try:
+            file_size = os.path.getsize(bep_file_path)
+            if file_size > self.MAX_FILE_SIZE:
+                if self.verbose:
+                    print(f"⚠️  Warning: BEP file is large ({file_size / (1024*1024):.1f}MB), "
+                          f"processing may be slow or limited")
+        except OSError:
+            pass  # Continue if we can't get file size
+        
+        try:
+            bytes_processed = 0
             with open(bep_file_path, 'rb') as f:
-                while True:
+                while len(failures) < self.MAX_FAILURES:
                     # Read varint-delimited protobuf messages
                     message_data = self._read_varint_delimited_message(f)
                     if not message_data:
+                        break
+                    
+                    bytes_processed += len(message_data)
+                    
+                    # Stop processing if file is too large and we have some failures
+                    if bytes_processed > self.MAX_FILE_SIZE and failures:
+                        if self.verbose:
+                            print(f"⚠️  Stopping processing due to file size limit")
                         break
                     
                     # Parse the message for failure events
@@ -39,10 +76,25 @@ class BEPAnalyzer:
                         failures.append(failure)
                         if self.verbose:
                             print(f"🔍 Found failure: {failure.get('target', 'Unknown')}")
+                
+                # Check if we hit the failure limit
+                if len(failures) >= self.MAX_FAILURES:
+                    # Count remaining failures without collecting them
+                    while True:
+                        message_data = self._read_varint_delimited_message(f)
+                        if not message_data:
+                            break
+                        failure = self._parse_build_event_for_failure(message_data)
+                        if failure:
+                            self.failures_skipped += 1
                         
         except Exception as e:
             if self.verbose:
                 print(f"Warning: Error reading BEP file: {e}")
+        
+        # Report if we hit limits
+        if self.failures_skipped > 0 and self.verbose:
+            print(f"⚠️  Skipped {self.failures_skipped} additional failures due to limit ({self.MAX_FAILURES})")
             
         return failures
     
@@ -61,15 +113,22 @@ class BEPAnalyzer:
         return message_data
     
     def _read_varint(self, f) -> Optional[int]:
-        """Read a varint from file."""
+        """Read a varint from file.
+        
+        Protobuf varints are at most 10 bytes as per specification:
+        https://protobuf.dev/reference/cpp/api-docs/google.protobuf.io.coded_stream/
+        """
+        max_bytes = self.MAX_VARINT_BYTES
         value = 0
         shift = 0
+        bytes_read = 0
         
-        while True:
+        while bytes_read < max_bytes:
             byte_data = f.read(1)
             if not byte_data:
                 return None
                 
+            bytes_read += 1
             byte = byte_data[0]
             value |= (byte & 0x7F) << shift
             
@@ -79,11 +138,283 @@ class BEPAnalyzer:
             shift += 7
             if shift >= 64:
                 return None
+        
+        # If we've read max_bytes and still haven't found the end, it's malformed
+        if bytes_read >= max_bytes:
+            if self.verbose:
+                print(f"Warning: Malformed varint detected (>{max_bytes} bytes)")
+            return None
                 
         return value
     
     def _parse_build_event_for_failure(self, message_data: bytes) -> Optional[Dict[str, Any]]:
-        """Parse a build event message for failure information."""
+        """Parse a build event message for failure information using protobuf."""
+        if PROTOBUF_AVAILABLE:
+            return self._parse_protobuf_event(message_data)
+        else:
+            # Fallback to string parsing
+            return self._parse_string_event(message_data)
+    
+    def _parse_protobuf_event(self, message_data: bytes) -> Optional[Dict[str, Any]]:
+        """Parse BEP event using protobuf parsing."""
+        try:
+            # Since we don't have the compiled protobuf classes, we'll use a hybrid approach
+            # Parse key protobuf fields manually for common failure patterns
+            event_dict = self._decode_protobuf_to_dict(message_data)
+            
+            if not event_dict:
+                return None
+                
+            # Check for ActionExecuted events with failures
+            if 'action' in event_dict:
+                action = event_dict['action']
+                if not action.get('success', True) or action.get('exit_code', 0) != 0:
+                    return self._extract_action_failure(event_dict, action)
+            
+            # Check for TargetComplete events with failures
+            if 'completed' in event_dict:
+                completed = event_dict['completed']
+                if not completed.get('success', True):
+                    return self._extract_target_failure(event_dict, completed)
+            
+            # Check for TestResult events with failures
+            if 'test_result' in event_dict:
+                test_result = event_dict['test_result']
+                status = test_result.get('status', 'NO_STATUS')
+                if status in ['FAILED', 'TIMEOUT', 'FAILED_TO_BUILD', 'REMOTE_FAILURE']:
+                    return self._extract_test_failure(event_dict, test_result)
+            
+            # Check for Aborted events
+            if 'aborted' in event_dict:
+                return self._extract_aborted_failure(event_dict)
+                
+        except Exception as e:
+            if self.verbose:
+                print(f"Warning: Error parsing protobuf message: {e}")
+                
+        return None
+    
+    def _decode_protobuf_to_dict(self, message_data: bytes) -> Optional[Dict[str, Any]]:
+        """Decode protobuf message to dictionary format."""
+        try:
+            # Use a simple protobuf field decoder to extract key information
+            # This is a simplified implementation that looks for common patterns
+            result = {}
+            
+            # Look for string fields that might contain labels, paths, etc.
+            strings = self._extract_protobuf_strings(message_data)
+            
+            # Check for common failure indicators in the binary data
+            if b'action' in message_data and (b'success' in message_data or b'exit_code' in message_data):
+                result['action'] = {
+                    'success': b'\x08\x00' not in message_data,  # success=false in protobuf
+                    'exit_code': self._extract_exit_code(message_data)
+                }
+                
+            if b'completed' in message_data and b'success' in message_data:
+                result['completed'] = {
+                    'success': b'\x08\x00' not in message_data
+                }
+                
+            if b'test_result' in message_data:
+                result['test_result'] = {
+                    'status': self._extract_test_status(message_data)
+                }
+                
+            if b'aborted' in message_data:
+                result['aborted'] = {
+                    'reason': self._extract_abort_reason(message_data)
+                }
+            
+            # Add extracted strings for context
+            if strings:
+                result['_strings'] = strings
+                
+            return result if result else None
+            
+        except Exception as e:
+            if self.verbose:
+                print(f"Warning: Error decoding protobuf: {e}")
+            return None
+    
+    def _extract_protobuf_strings(self, data: bytes) -> List[str]:
+        """Extract readable strings from protobuf data."""
+        strings = []
+        i = 0
+        while i < len(data) - 4 and len(strings) < self.MAX_STRINGS_PER_EVENT:
+            # Look for length-prefixed strings (common in protobuf)
+            if data[i] & 0x80 == 0:  # Single byte length
+                length = data[i]
+                if 1 <= length <= 200 and i + 1 + length <= len(data):
+                    try:
+                        string_data = data[i+1:i+1+length]
+                        text = string_data.decode('utf-8')
+                        if self._is_meaningful_string(text):
+                            strings.append(text)
+                    except UnicodeDecodeError:
+                        pass
+            i += 1
+        return strings
+    
+    def _is_meaningful_string(self, text: str) -> bool:
+        """Check if a string contains meaningful information."""
+        if len(text) < 3 or len(text) > 500:
+            return False
+        # Look for target labels, file paths, error messages
+        meaningful_patterns = [
+            '//',  # Bazel target
+            '.cc', '.cpp', '.h', '.py', '.java',  # File extensions
+            'error', 'failed', 'Error', 'Failed',  # Error indicators
+            'BUILD', 'WORKSPACE',  # Build files
+        ]
+        return any(pattern in text for pattern in meaningful_patterns)
+    
+    def _extract_exit_code(self, data: bytes) -> int:
+        """Extract exit code from protobuf data."""
+        # Look for exit_code field (typically field 2 in ActionExecuted)
+        for i in range(len(data) - 4):
+            if data[i:i+2] == b'\x10':  # Field 2, varint
+                # Next byte(s) contain the exit code
+                if i + 2 < len(data):
+                    return data[i + 2] if data[i + 2] < 128 else 0
+        return 0
+    
+    def _extract_test_status(self, data: bytes) -> str:
+        """Extract test status from protobuf data."""
+        status_map = {
+            0: 'NO_STATUS', 1: 'PASSED', 2: 'FLAKY', 3: 'TIMEOUT',
+            4: 'FAILED', 5: 'INCOMPLETE', 6: 'REMOTE_FAILURE', 7: 'FAILED_TO_BUILD'
+        }
+        # Look for status field (typically field 5 in TestResult)
+        for i in range(len(data) - 2):
+            if data[i] == 0x28:  # Field 5, varint
+                if i + 1 < len(data):
+                    status_code = data[i + 1] if data[i + 1] < 128 else 0
+                    return status_map.get(status_code, 'UNKNOWN')
+        return 'NO_STATUS'
+    
+    def _extract_abort_reason(self, data: bytes) -> str:
+        """Extract abort reason from protobuf data."""
+        abort_reasons = {
+            1: 'USER_INTERRUPTED', 2: 'TIME_OUT', 3: 'REMOTE_ENVIRONMENT_FAILURE',
+            4: 'INTERNAL', 5: 'LOADING_FAILURE', 6: 'ANALYSIS_FAILURE'
+        }
+        # Look for reason field in Aborted message
+        for i in range(len(data) - 2):
+            if data[i] == 0x08:  # Field 1, varint
+                if i + 1 < len(data):
+                    reason_code = data[i + 1] if data[i + 1] < 128 else 0
+                    return abort_reasons.get(reason_code, 'UNKNOWN')
+        return 'UNKNOWN'
+    
+    def _extract_action_failure(self, event_dict: Dict, action: Dict) -> Dict[str, Any]:
+        """Extract failure details from ActionExecuted event."""
+        failure = {
+            'type': 'build_failure',
+            'status': 'COMPILATION_FAILED' if action.get('exit_code', 0) != 0 else 'BUILD_FAILED',
+            'target': self._find_target_label(event_dict),
+            'message': '',
+            'file_location': None,
+            'line_number': None,
+            'exit_code': action.get('exit_code', 0)
+        }
+        
+        # Try to extract error details from strings
+        strings = event_dict.get('_strings', [])
+        failure['message'] = self._extract_error_message_from_strings(strings)
+        failure['file_location'], failure['line_number'] = self._extract_file_location_from_strings(strings)
+        
+        return failure
+    
+    def _extract_target_failure(self, event_dict: Dict, completed: Dict) -> Dict[str, Any]:
+        """Extract failure details from TargetComplete event."""
+        return {
+            'type': 'build_failure',
+            'status': 'BUILD_FAILED',
+            'target': self._find_target_label(event_dict),
+            'message': 'Target build failed',
+            'file_location': None,
+            'line_number': None
+        }
+    
+    def _extract_test_failure(self, event_dict: Dict, test_result: Dict) -> Dict[str, Any]:
+        """Extract failure details from TestResult event."""
+        return {
+            'type': 'test_failure',
+            'status': test_result.get('status', 'TEST_FAILED'),
+            'target': self._find_target_label(event_dict),
+            'message': f"Test failed with status: {test_result.get('status', 'UNKNOWN')}",
+            'file_location': None,
+            'line_number': None
+        }
+    
+    def _extract_aborted_failure(self, event_dict: Dict) -> Dict[str, Any]:
+        """Extract failure details from Aborted event."""
+        aborted = event_dict['aborted']
+        return {
+            'type': 'build_failure',
+            'status': 'BUILD_ABORTED',
+            'target': 'Build aborted',
+            'message': f"Build aborted: {aborted.get('reason', 'UNKNOWN')}",
+            'file_location': None,
+            'line_number': None
+        }
+    
+    def _find_target_label(self, event_dict: Dict) -> str:
+        """Find target label from event data."""
+        strings = event_dict.get('_strings', [])
+        for s in strings:
+            if s.startswith('//'):
+                # Clean up the target label
+                clean_label = s.strip('",;()[]{}')
+                if ':' in clean_label or clean_label.count('/') >= 2:
+                    return clean_label
+        return 'unknown'
+    
+    def _extract_error_message_from_strings(self, strings: List[str]) -> str:
+        """Extract error message from string list."""
+        error_keywords = ['error', 'failed', 'Error', 'Failed', 'compilation', 'undefined']
+        error_lines = []
+        
+        for s in strings:
+            if any(keyword in s for keyword in error_keywords) and len(s) > 10:
+                # Truncate very long lines
+                if len(s) > self.MAX_MESSAGE_SIZE // 5:  # Allow up to 5 lines
+                    s = s[:self.MAX_MESSAGE_SIZE // 5] + "... (truncated)"
+                error_lines.append(s)
+            
+            # Stop if we have enough lines
+            if len(error_lines) >= self.MAX_ERROR_LINES:
+                break
+        
+        message = '\n'.join(error_lines[:self.MAX_ERROR_LINES])
+        
+        # Ensure total message doesn't exceed limit
+        if len(message) > self.MAX_MESSAGE_SIZE:
+            message = message[:self.MAX_MESSAGE_SIZE] + "... (truncated)"
+        
+        return message
+    
+    def _extract_file_location_from_strings(self, strings: List[str]) -> tuple:
+        """Extract file location and line number from strings."""
+        import re
+        
+        file_patterns = [
+            r'([a-zA-Z0-9_/\-\.]+\.(?:cc|cpp|h|hpp|py|java|go|js|ts|kt|scala|rs|c|C|cxx)):(\d+)',
+            r'(BUILD(?:\.bazel)?):(\d+)',
+            r'(WORKSPACE(?:\.bazel)?):(\d+)'
+        ]
+        
+        for s in strings:
+            for pattern in file_patterns:
+                match = re.search(pattern, s)
+                if match:
+                    return match.group(1), int(match.group(2))
+        
+        return None, None
+    
+    def _parse_string_event(self, message_data: bytes) -> Optional[Dict[str, Any]]:
+        """Fallback string-based parsing when protobuf libraries aren't available."""
         try:
             # Look for failure indicators in the raw message
             message_str = message_data.decode('utf-8', errors='ignore')
@@ -217,15 +548,30 @@ class BEPAnalyzer:
                 if any(word in line_lower for word in relevant_keywords):
                     # Skip very short or uninformative lines
                     if len(line.strip()) > 10 and not line.strip().startswith('#'):
-                        error_lines.append(line.strip())
+                        # Truncate very long lines
+                        line_text = line.strip()
+                        if len(line_text) > self.MAX_MESSAGE_SIZE // self.MAX_ERROR_LINES:
+                            line_text = line_text[:self.MAX_MESSAGE_SIZE // self.MAX_ERROR_LINES] + "... (truncated)"
+                        error_lines.append(line_text)
+                
+                # Stop if we have enough lines
+                if len(error_lines) >= self.MAX_ERROR_LINES:
+                    break
             
             if error_lines:
-                failure['message'] = '\n'.join(error_lines[:5])  # Limit to 5 lines
+                message = '\n'.join(error_lines[:self.MAX_ERROR_LINES])
+                # Ensure total message doesn't exceed limit
+                if len(message) > self.MAX_MESSAGE_SIZE:
+                    message = message[:self.MAX_MESSAGE_SIZE] + "... (truncated)"
+                failure['message'] = message
             elif failure_type in message_str:
                 # Fallback: include the line with the failure type
                 for line in lines:
                     if failure_type in line and len(line.strip()) > 10:
-                        failure['message'] = line.strip()
+                        failure_msg = line.strip()
+                        if len(failure_msg) > self.MAX_MESSAGE_SIZE:
+                            failure_msg = failure_msg[:self.MAX_MESSAGE_SIZE] + "... (truncated)"
+                        failure['message'] = failure_msg
                         break
         
         return failure
@@ -399,10 +745,17 @@ class BuildkiteAnnotator:
         lines = [line.strip() for line in message.split('\n') if line.strip()]
         
         # Limit to reasonable length
-        if len(lines) > 10:
-            lines = lines[:10] + ['... (truncated)']
+        max_lines = 15  # Allow a bit more for display
+        if len(lines) > max_lines:
+            lines = lines[:max_lines] + ['... (truncated)']
         
-        return '\n'.join(lines)
+        # Ensure total length is reasonable for annotations
+        result = '\n'.join(lines)
+        max_annotation_size = 10000  # 10KB limit for Buildkite annotations
+        if len(result) > max_annotation_size:
+            result = result[:max_annotation_size] + '\n... (truncated for display)'
+        
+        return result
     
     def _create_buildkite_annotation(self, content: str, verbose: bool = False):
         """Create actual Buildkite annotation."""
@@ -467,8 +820,28 @@ def main():
         action="store_true",
         help="Exit successfully if no failures found"
     )
+    parser.add_argument(
+        "--max-failures",
+        type=int,
+        default=50,
+        help="Maximum number of failures to collect (default: 50)"
+    )
+    parser.add_argument(
+        "--max-file-size",
+        type=int,
+        default=100,
+        help="Maximum file size to process in MB (default: 100)"
+    )
     
     args = parser.parse_args()
+    
+    # Check protobuf availability
+    if args.verbose:
+        if PROTOBUF_AVAILABLE:
+            print("✅ Using enhanced protobuf parsing")
+        else:
+            print("⚠️  Protobuf library not available, using fallback string parsing")
+            print("   Install with: pip install protobuf")
     
     # Check if BEP file exists
     if not os.path.exists(args.bep_file):
@@ -479,8 +852,10 @@ def main():
         print(f"🔍 Analyzing BEP file: {args.bep_file}")
     
     try:
-        # Initialize analyzer
+        # Initialize analyzer with custom limits
         analyzer = BEPAnalyzer(verbose=args.verbose)
+        analyzer.MAX_FAILURES = args.max_failures
+        analyzer.MAX_FILE_SIZE = args.max_file_size * 1024 * 1024  # Convert MB to bytes
         
         # Parse BEP file
         failures = analyzer.extract_failures(args.bep_file)

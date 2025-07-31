@@ -13,6 +13,8 @@ DIR="$(cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd)"
 BEP_FILE=$(plugin_read_config BEP_FILE "")
 SKIP_IF_NO_BEP=$(plugin_read_config SKIP_IF_NO_BEP "false")
 VERBOSE=$(plugin_read_config VERBOSE "false")
+MAX_FAILURES=$(plugin_read_config MAX_FAILURES "50")
+MAX_FILE_SIZE_MB=$(plugin_read_config MAX_FILE_SIZE_MB "100")
 
 echo "🔍 Bazel Failure Analyzer - Looking for BEP protobuf file..."
 
@@ -75,6 +77,10 @@ fi
 if [[ "${SKIP_IF_NO_BEP}" == "true" ]]; then
   ANALYZER_ARGS+=("--skip-if-no-failures")
 fi
+
+# Add memory limit options
+ANALYZER_ARGS+=("--max-failures" "${MAX_FAILURES}")
+ANALYZER_ARGS+=("--max-file-size" "${MAX_FILE_SIZE_MB}")
 
 # Run the analyzer
 "$ANALYZER_BINARY" "${ANALYZER_ARGS[@]}"

@@ -15,4 +15,14 @@ configuration:
     verbose:
       type: boolean
       description: "Enable verbose output (default: false)"
+    max_failures:
+      type: integer
+      description: "Maximum number of failures to collect (default: 50)"
+      minimum: 1
+      maximum: 500
+    max_file_size_mb:
+      type: integer
+      description: "Maximum BEP file size to process in MB (default: 100)"
+      minimum: 1
+      maximum: 1000
   additionalProperties: false
