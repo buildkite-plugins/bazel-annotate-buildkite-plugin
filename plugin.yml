@@ -1,14 +1,28 @@
 name: Bazel BEP Annotate
-description: Creates Buildkite annotations from Bazel Event Protocol output
+description: Fast protobuf-based failure analysis from Bazel Event Protocol output
 author: https://github.com/mcncl
 requirements:
   - bash
-  - jq
-  - bc
+  - python3
 configuration:
   properties:
     bep_file:
       type: string
+      description: "Path to the BEP protobuf file (default: auto-detect)"
     skip_if_no_bep:
       type: boolean
+      description: "Skip gracefully if no BEP file found (default: false)"
+    verbose:
+      type: boolean
+      description: "Enable verbose output (default: false)"
+    max_failures:
+      type: integer
+      description: "Maximum number of failures to collect (default: 50)"
+      minimum: 1
+      maximum: 500
+    max_file_size_mb:
+      type: integer
+      description: "Maximum BEP file size to process in MB (default: 100)"
+      minimum: 1
+      maximum: 1000
   additionalProperties: false

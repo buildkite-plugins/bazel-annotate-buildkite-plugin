@@ -1,0 +1,8 @@
+"""Bazel module for bazel-annotate-buildkite-plugin."""
+
+module(
+    name = "bazel_annotate_buildkite_plugin",
+    version = "1.0.0",
+)
+
+# No external dependencies needed - using only built-in Bazel rules
