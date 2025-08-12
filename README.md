@@ -30,6 +30,16 @@ Path to the Bazel Event Protocol protobuf file to parse. If not provided, the pl
 If set to `true`, the plugin will exit successfully if no BEP file is found, instead of failing the build.
 Default: `false`
 
+## Processing Limits
+
+To ensure reliable performance and prevent memory issues, the plugin enforces these limits:
+
+- **File size**: 100MB maximum BEP file size (configurable with `--max-file-size`)
+- **Failure count**: 50 failures maximum per build (configurable with `--max-failures`)
+- **Annotation size**: 1MB maximum per annotation (Buildkite's platform limit)
+
+When limits are exceeded, the plugin will display clear warnings and continue with truncated results.
+
 ## Examples
 
 ### Basic usage with explicit BEP file
