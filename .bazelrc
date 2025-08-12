@@ -11,3 +11,7 @@ build --show_result=5
 # Testing
 test --test_output=errors
 test --test_summary=short
+
+# Enable modern C++ features required by protobuf
+build --cxxopt=-std=c++17
+build --host_cxxopt=-std=c++17
