@@ -47,9 +47,9 @@ class BEPAnalyzer:
         try:
             file_size = os.path.getsize(bep_file_path)
             if file_size > self.MAX_FILE_SIZE:
-                if self.verbose:
-                    print(f"⚠️  Warning: BEP file is large ({file_size / (1024*1024):.1f}MB), "
-                          f"processing may be slow or limited")
+                print(f"⚠️  Warning: BEP file is large ({file_size / (1024*1024):.1f}MB), "
+                      f"exceeds limit of {self.MAX_FILE_SIZE / (1024*1024):.0f}MB. "
+                      f"Processing may be truncated to avoid memory issues.")
         except OSError:
             pass  # Continue if we can't get file size
         
@@ -66,8 +66,8 @@ class BEPAnalyzer:
                     
                     # Stop processing if file is too large and we have some failures
                     if bytes_processed > self.MAX_FILE_SIZE and failures:
-                        if self.verbose:
-                            print(f"⚠️  Stopping processing due to file size limit")
+                        print(f"⚠️  Reached file size limit of {self.MAX_FILE_SIZE / (1024*1024):.0f}MB, "
+                              f"stopping analysis. Found {len(failures)} failures so far.")
                         break
                     
                     # Parse the message for failure events
@@ -92,9 +92,10 @@ class BEPAnalyzer:
             if self.verbose:
                 print(f"Warning: Error reading BEP file: {e}")
         
-        # Report if we hit limits
-        if self.failures_skipped > 0 and self.verbose:
-            print(f"⚠️  Skipped {self.failures_skipped} additional failures due to limit ({self.MAX_FAILURES})")
+        # Report if we hit limits - always show this, not just in verbose mode
+        if self.failures_skipped > 0:
+            print(f"⚠️  Found {len(failures)} failures (limit: {self.MAX_FAILURES}). "
+                  f"Skipped {self.failures_skipped} additional failures to avoid memory issues.")
             
         return failures
     
@@ -578,24 +579,18 @@ class BEPAnalyzer:
 
 
 class BuildkiteAnnotator:
-    """Creates Buildkite annotations from failure analysis."""
+    def _get_buildkite_env(self, var_name: str, default: str = None) -> Optional[str]:
+        """Helper to get Buildkite environment variable with consistent naming."""
+        return os.getenv(f'BUILDKITE_{var_name}' if not var_name.startswith('BUILDKITE') else var_name, default)
     
-    def __init__(self):
-        # Check for Buildkite environment using multiple indicators
-        self.is_buildkite = (
-            os.getenv('BUILDKITE') == 'true' or 
-            os.getenv('BUILDKITE_BUILD_ID') is not None or
-            os.getenv('BUILDKITE_JOB_ID') is not None
-        )
-        
-        # Get repository information for GitHub links
-        self.repo_url = self._get_repo_url()
-        self.commit_sha = self._get_commit_sha()
+    def _detect_buildkite_environment(self) -> bool:
+        """Detect if running in Buildkite environment by checking key environment variables."""
+        return bool(self._get_buildkite_env('BUILDKITE') or self._get_buildkite_env('BUILD_ID'))
         
     def _get_repo_url(self) -> Optional[str]:
         """Get the GitHub repository URL."""
         # Try Buildkite environment first
-        buildkite_repo = os.getenv('BUILDKITE_REPO')
+        buildkite_repo = self._get_buildkite_env('REPO')
         if buildkite_repo:
             # Convert SSH to HTTPS: git@github.com:owner/repo.git -> https://github.com/owner/repo
             if buildkite_repo.startswith('git@github.com:'):
@@ -621,12 +616,12 @@ class BuildkiteAnnotator:
     def _get_commit_sha(self) -> str:
         """Get the current commit SHA."""
         # Try Buildkite environment first
-        commit = os.getenv('BUILDKITE_COMMIT')
+        commit = self._get_buildkite_env('COMMIT')
         if commit:
             return commit
             
         # Try branch if no commit SHA
-        branch = os.getenv('BUILDKITE_BRANCH')
+        branch = self._get_buildkite_env('BRANCH')
         if branch:
             return branch
             
@@ -749,11 +744,16 @@ class BuildkiteAnnotator:
         if len(lines) > max_lines:
             lines = lines[:max_lines] + ['... (truncated)']
         
-        # Ensure total length is reasonable for annotations
+        # Use Buildkite's full annotation limit
         result = '\n'.join(lines)
-        max_annotation_size = 10000  # 10KB limit for Buildkite annotations
+        max_annotation_size = 1024 * 1024  # Buildkite's 1MB annotation limit
+        
+        # Warn if getting close to limit (500KB+) - lightweight check
+        if len(result) > 500 * 1024:
+            print(f"⚠️  Large annotation: {len(result) / 1024:.0f}KB (Buildkite limit: 1MB)")
+        
         if len(result) > max_annotation_size:
-            result = result[:max_annotation_size] + '\n... (truncated for display)'
+            result = result[:max_annotation_size] + f'\n... (truncated from {len(result)} to {max_annotation_size} chars due to Buildkite 1MB limit)'
         
         return result
     
@@ -761,7 +761,7 @@ class BuildkiteAnnotator:
         """Create actual Buildkite annotation."""
         try:
             # Use step ID as context so each step gets its own annotation
-            context = os.getenv('BUILDKITE_STEP_ID', 'bazel-failures')
+            context = self._get_buildkite_env('STEP_ID', 'bazel-failures')
             
             # Use buildkite-agent to create annotation
             cmd = [
@@ -798,7 +798,8 @@ class BuildkiteAnnotator:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Analyze Bazel BEP protobuf files for failures"
+        description="Analyze Bazel BEP protobuf files for failures. "
+                   "Processing limits: max 100MB files, max 50 failures by default to avoid memory issues."
     )
     parser.add_argument(
         "bep_file",
@@ -824,13 +825,13 @@ def main():
         "--max-failures",
         type=int,
         default=50,
-        help="Maximum number of failures to collect (default: 50)"
+        help="Maximum number of failures to collect (default: 50, prevents memory overload)"
     )
     parser.add_argument(
         "--max-file-size",
         type=int,
         default=100,
-        help="Maximum file size to process in MB (default: 100)"
+        help="Maximum file size to process in MB (default: 100, prevents memory issues with large BEP files)"
     )
     
     args = parser.parse_args()
