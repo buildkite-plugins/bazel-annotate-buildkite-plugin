@@ -1,0 +1,13 @@
+"""Bazel module for bazel-annotate-buildkite-plugin."""
+
+module(
+    name = "bazel_annotate_buildkite_plugin",
+    version = "1.0.0",
+)
+
+bazel_dep(name = "protobuf", version = "31.1")
+bazel_dep(name = "rules_proto", version = "7.1.0")
+bazel_dep(name = "rules_python", version = "1.5.3")
+
+# Register protobuf toolchain
+register_toolchains("@protobuf//toolchain:all")
