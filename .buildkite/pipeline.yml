@@ -7,8 +7,6 @@ steps:
               folders:
                 - tests
       - label: ":bazel: Bazel Tests"
-        agents:
-          queue: mac
         command: |
           if command -v bazel &> /dev/null; then
             bazel test //...
