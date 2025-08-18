@@ -1,44 +1,45 @@
 # Bazel BEP Failure Analyzer Buildkite Plugin [![Build status](https://badge.buildkite.com/522d5a765d9856d57c8ce69162540279b81db9d2852b5f7060.svg?branch=main)](https://buildkite.com/buildkite/plugins-bazel-annotate)
 
-A **fast** Buildkite plugin that analyzes Bazel Event Protocol (BEP) protobuf files and creates focused annotations for build failures. Uses native protobuf parsing for maximum performance.
+A fast Buildkite plugin that analyzes Bazel Event Protocol (BEP) protobuf files and creates focused annotations for build failures. Prefers native protobuf parsing when available for accuracy and performance, with a safe string-based fallback.
 
 ## Features
 
-- ⚡ **Fast protobuf parsing** - Handles 100k+ targets in seconds
-- 🎯 **Failure-focused** - Only shows what developers need to see  
-- 🔗 **GitHub linking** - Links directly to failing source code lines
-- 🔍 **Auto-detection** - Automatically finds BEP protobuf files
-- 📦 **Zero dependencies** - Self-contained Python binary
-- 🚨 **Clear annotations** - Clean, actionable failure information
-- 🛠️ **Bazel-native** - Uses Bazel's native protobuf BEP format
+- ⚡ Fast BEP processing — scales to very large builds
+- 🎯 Failure-focused — concise, actionable failure details
+- 🔗 GitHub linking — direct links to failing files/lines
+- 🔍 Auto-detection — finds BEP files in common locations
+- 🧰 Minimal deps — requires Bash and Python 3; protobuf is optional
+- 🚨 Clear annotations — designed for Buildkite’s annotation UI
+- 🛠️ Bazel-native — understands Bazel BEP failure types
+- 🔁 Robust — retries annotation creation on transient errors
 
 ## Prerequisites
 
-This plugin requires:
 - Bash
 - Python 3
-- Bazel (for generating BEP files)
+- Bazel (to generate BEP files)
+- Optional: Python `protobuf` package (recommended for best parsing)
 
-## Options
+> Without `protobuf`, the analyzer falls back to string-based parsing.
+
+## Plugin Options
 
 ### `bep_file` (optional)
-
-Path to the Bazel Event Protocol protobuf file to parse. If not provided, the plugin will look for files at common locations (bazel-events.pb, bazel-bep.pb, bep.pb, events.pb).
+Path to the Bazel Event Protocol protobuf file to parse. If not provided, the plugin looks for common filenames: `bazel-events.pb`, `bazel-bep.pb`, `bep.pb`, `events.pb`.
 
 ### `skip_if_no_bep` (optional, boolean)
-
-If set to `true`, the plugin will exit successfully if no BEP file is found, instead of failing the build.
+If `true`, the plugin exits successfully when no BEP file is found.
 Default: `false`
 
-## Processing Limits
+## Processing Limits and Behavior
 
-To ensure reliable performance and prevent memory issues, the plugin enforces these limits:
+To ensure reliability and prevent memory issues, the analyzer enforces limits (configurable):
 
-- **File size**: 100MB maximum BEP file size (configurable with `--max-file-size`)
-- **Failure count**: 50 failures maximum per build (configurable with `--max-failures`)
-- **Annotation size**: 1MB maximum per annotation (Buildkite's platform limit)
+- File size: 100MB max BEP file size (`--max-file-size` in MB)
+- Failure count: 50 failures max (`--max-failures`)
+- Annotation size: 1MB (Buildkite platform limit)
 
-When limits are exceeded, the plugin will display clear warnings and continue with truncated results.
+When limits are exceeded, warnings are logged and results are truncated safely. Defaults are defined in [`bin/config.py`](bin/config.py).
 
 ## Examples
 
@@ -54,7 +55,6 @@ steps:
           bep_file: bazel-events.pb
 ```
 
-
 ### Skip annotations if no BEP file found
 
 ```yaml
@@ -68,8 +68,6 @@ steps:
           skip_if_no_bep: true
 ```
 
-## Common Use Cases
-
 ### Running tests with annotations
 
 ```yaml
@@ -82,20 +80,7 @@ steps:
           bep_file: bazel-test-events.pb
 ```
 
-### Running builds with annotations in a custom Bazel workspace
-
-```yaml
-steps:
-  - label: "🔨 Build with Bazel (custom workspace)"
-    command: |
-      cd my-workspace
-      bazel build //... --build_event_binary_file=bazel-events.pb
-    plugins:
-      - bazel-annotate#v0.1.2:
-          bep_file: my-workspace/bazel-events.pb
-```
-
-### Multiple Bazel jobs in a pipeline with consolidated annotations
+### Multiple Bazel jobs in a pipeline with separate annotations
 
 ```yaml
 steps:
@@ -121,14 +106,30 @@ steps:
           bep_file: bazel-package-events.pb
 ```
 
+## Development
+
+- Run shell tests in Docker:
+
+```bash
+docker compose run --rm tests bats tests
+```
+
+- Run Python unit tests locally:
+
+```bash
+python3 -m unittest -v tests/test_analyzer.py
+```
+
+- Linting and Shellcheck are covered in the Buildkite pipeline for the plugin (see `.buildkite/pipeline.yml`).
+
 ## Compatibility
 
 | Elastic Stack | Agent Stack K8s | Hosted (Mac) | Hosted (Linux) | Notes |
-| :-----------: | :-------------: | :----: | :----: |:---- |
-| 📝 | 📝 | ✅ | 📝 | See below|
+| :-----------: | :-------------: | :----------: | :------------: | :---- |
+| 📝            | 📝              | ✅           | 📝             | Agents on Linux/K8s need Bazel available |
 
-- ✅ Full supported
-- 📝 Agents running on Linux or Kubernetes will need to have Bazel made available via installation
+- ✅ Fully supported
+- 📝 Agents running on Linux or Kubernetes must provide Bazel
 
 ## 👩‍💻 Contributing
 
