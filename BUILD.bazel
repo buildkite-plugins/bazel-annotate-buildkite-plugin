@@ -45,7 +45,10 @@ genrule(
 
 py_binary(
     name = "failure_analyzer",
-    srcs = [":failure_analyzer_py"],
+    srcs = [
+        ":failure_analyzer_py",
+        "bin/config.py",
+    ],
     main = "bin/bazel_failure_analyzer.py",
     deps = [
         "@protobuf//:protobuf_python",
