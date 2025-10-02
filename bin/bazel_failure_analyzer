@@ -9,8 +9,9 @@ Uses proper protobuf parsing for more accurate failure detection.
 import argparse
 import sys
 import os
+import re
 import struct
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 from pathlib import Path
 import subprocess
 import logging
@@ -28,6 +29,22 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m')
+
+FAILURE_LINE = re.compile(r'(?:FAIL:|FAILED:)\s*(?:\x1b\[[0-9;]*m)*(//[^\s\(]+)')
+
+TARGET_PATTERN = re.compile(r'//[a-zA-Z0-9_\-][a-zA-Z0-9_/\-]*:[a-zA-Z0-9_/\-]+')
+
+FILE_LOCATION_PATTERNS = [
+    re.compile(r'([a-zA-Z0-9_/\-\.]+\.(cc|cpp|h|hpp|py|java|go|js|ts|kt|scala|rs|c|C|cxx)):(\d+)'),
+    re.compile(r'(BUILD(?:\.bazel)?):(\d+)'),
+    re.compile(r'(WORKSPACE(?:\.bazel)?):(\d+)')
+]
+
+MIN_STRING_LENGTH = 3
+MAX_STRING_LENGTH = 500
+MAX_PROTOBUF_STRING_LENGTH = 200
+
 
 class BEPAnalyzer:
     """Analyzes Bazel Build Event Protocol protobuf files for failures."""
@@ -36,6 +53,7 @@ class BEPAnalyzer:
         self.verbose = verbose
         self.failures = []
         self.failures_skipped = 0  # Track skipped failures due to limits
+        self.seen_targets = set()  # Track targets to avoid duplicates
         # Limits (bytes, counts)
         self.MAX_FILE_SIZE = cfg.MAX_FILE_SIZE_MB_DEFAULT * 1024 * 1024
         self.MAX_FAILURES = cfg.MAX_FAILURES_DEFAULT
@@ -47,6 +65,7 @@ class BEPAnalyzer:
     def extract_failures(self, bep_file_path: str) -> List[Dict[str, Any]]:
         """Extract failure information from a BEP protobuf file."""
         failures = []
+        self.seen_targets.clear()  # Reset for each extract
 
         # Check file size before processing
         try:
@@ -78,12 +97,17 @@ class BEPAnalyzer:
                         )
                         break
 
-                    # Parse the message for failure events
-                    failure = self._parse_build_event_for_failure(message_data)
-                    if failure:
-                        failures.append(failure)
-                        if self.verbose:
-                            logger.info("Found failure: %s", failure.get('target', 'Unknown'))
+                    # Parse the message for failure events (returns a list or None)
+                    message_failures = self._parse_build_event_for_failure(message_data)
+                    if message_failures:
+                        # Remove duplicates by target
+                        for failure in message_failures:
+                            target = failure.get('target', 'unknown')
+                            if target not in self.seen_targets:
+                                self.seen_targets.add(target)
+                                failures.append(failure)
+                                if self.verbose:
+                                    logger.info("Found failure: %s", target)
 
                 # Check if we hit the failure limit
                 if len(failures) >= self.MAX_FAILURES:
@@ -92,9 +116,14 @@ class BEPAnalyzer:
                         message_data = self._read_varint_delimited_message(f)
                         if not message_data:
                             break
-                        failure = self._parse_build_event_for_failure(message_data)
-                        if failure:
-                            self.failures_skipped += 1
+                        message_failures = self._parse_build_event_for_failure(message_data)
+                        if message_failures:
+                            # Count only new unique failures
+                            for failure in message_failures:
+                                target = failure.get('target', 'unknown')
+                                if target not in self.seen_targets:
+                                    self.seen_targets.add(target)
+                                    self.failures_skipped += 1
 
         except Exception as e:
             if self.verbose:
@@ -158,7 +187,7 @@ class BEPAnalyzer:
 
         return value
 
-    def _parse_build_event_for_failure(self, message_data: bytes) -> Optional[Dict[str, Any]]:
+    def _parse_build_event_for_failure(self, message_data: bytes) -> Optional[List[Dict[str, Any]]]:
         """Parse a build event message for failure information using protobuf."""
         if PROTOBUF_AVAILABLE:
             return self._parse_protobuf_event(message_data)
@@ -166,9 +195,24 @@ class BEPAnalyzer:
             # Fallback to string parsing
             return self._parse_string_event(message_data)
 
-    def _parse_protobuf_event(self, message_data: bytes) -> Optional[Dict[str, Any]]:
-        """Parse BEP event using protobuf parsing."""
+    def _parse_protobuf_event(self, message_data: bytes) -> Optional[List[Dict[str, Any]]]:
+        """Parse BEP event using protobuf parsing.
+
+        Returns:
+            A list of failure dicts, or None if no failures found.
+        """
         try:
+            # Check for Progress events with failure messages
+            # May contain ANSI color codes
+            message_str = message_data.decode('utf-8', errors='ignore')
+            if ('FAIL:' in message_str and '//' in message_str) or \
+               ('FAILED:' in message_str and '//' in message_str):
+                # Avoid false positives from command-line arguments
+                if not ('--client_env' in message_str or '--default_override' in message_str):
+                    if self.verbose:
+                        logger.info("Found Progress event with failure, extracting all failures")
+                    return self._extract_all_progress_failures(message_str)
+
             # Since we don't have the compiled protobuf classes, we'll use a hybrid approach
             # Parse key protobuf fields manually for common failure patterns
             event_dict = self._decode_protobuf_to_dict(message_data)
@@ -180,24 +224,24 @@ class BEPAnalyzer:
             if 'action' in event_dict:
                 action = event_dict['action']
                 if not action.get('success', True) or action.get('exit_code', 0) != 0:
-                    return self._extract_action_failure(event_dict, action)
+                    return [self._extract_action_failure(event_dict, action)]
 
             # Check for TargetComplete events with failures
             if 'completed' in event_dict:
                 completed = event_dict['completed']
                 if not completed.get('success', True):
-                    return self._extract_target_failure(event_dict, completed)
+                    return [self._extract_target_failure(event_dict, completed)]
 
             # Check for TestResult events with failures
             if 'test_result' in event_dict:
                 test_result = event_dict['test_result']
                 status = test_result.get('status', 'NO_STATUS')
                 if status in ['FAILED', 'TIMEOUT', 'FAILED_TO_BUILD', 'REMOTE_FAILURE']:
-                    return self._extract_test_failure(event_dict, test_result)
+                    return [self._extract_test_failure(event_dict, test_result)]
 
             # Check for Aborted events
             if 'aborted' in event_dict:
-                return self._extract_aborted_failure(event_dict)
+                return [self._extract_aborted_failure(event_dict)]
 
         except Exception as e:
             if self.verbose:
@@ -412,8 +456,6 @@ class BEPAnalyzer:
 
     def _extract_file_location_from_strings(self, strings: List[str]) -> tuple:
         """Extract file location and line number from strings."""
-        import re
-        
         file_patterns = [
             r'([a-zA-Z0-9_/\-\.]+\.(?:cc|cpp|h|hpp|py|java|go|js|ts|kt|scala|rs|c|C|cxx)):(\d+)',
             r'(BUILD(?:\.bazel)?):(\d+)',
@@ -428,16 +470,54 @@ class BEPAnalyzer:
         
         return None, None
     
-    def _parse_string_event(self, message_data: bytes) -> Optional[Dict[str, Any]]:
-        """Fallback string-based parsing when protobuf libraries aren't available."""
+    def _extract_all_progress_failures(self, message_str: str) -> Optional[List[Dict[str, Any]]]:
+        """Extract unique test failures from a Progress event."""
+        failures = []
+        seen = set()
+
+        for line in message_str.split('\n'):
+            if 'FAIL:' not in line and 'FAILED:' not in line:
+                continue
+
+            match = FAILURE_LINE.search(line)
+            if not match:
+                continue
+
+            target = ANSI_ESCAPE.sub('', match.group(1)).strip('",;()[]{}')
+
+            if target in seen or not (target.startswith('//') and ':' in target):
+                continue
+
+            seen.add(target)
+
+            log_match = re.search(r'see\s+([^\)]+\.log)', line)
+            log_file = log_match.group(1).strip() if log_match else None
+
+            failures.append({
+                'type': 'test_failure',
+                'status': 'FAILED',
+                'target': target,
+                'message': 'Test failed (see build output)',
+                'file_location': log_file,
+                'line_number': None
+            })
+
+        return failures if failures else None
+
+    def _parse_string_event(self, message_data: bytes) -> Optional[List[Dict[str, Any]]]:
+        """Fallback string-based parsing when protobuf libraries aren't available.
+
+        Returns:
+            A list of failure dicts, or None if no failures found.
+        """
         try:
             # Look for failure indicators in the raw message
             message_str = message_data.decode('utf-8', errors='ignore')
-            
+
             # Pattern matching for actual build failures (be more specific)
             failure_patterns = [
                 'FAILED_TO_BUILD',
-                'COMPILATION_FAILED', 
+                'COMPILATION_FAILED',
                 'TEST_FAILED',
                 'BUILD_FAILED',
                 'FAILED TARGETS',
@@ -445,25 +525,35 @@ class BEPAnalyzer:
                 '"status": "FAILED"',  # Test failures
                 'testFailureMessage'   # Test failure messages
             ]
-            
+
+            # Special check for progress output with ANSI codes: "FAIL:" or "FAILED:" near "//"
+            has_progress_failure = (('FAIL:' in message_str or 'FAILED:' in message_str) and '//' in message_str)
+
             # Only look for failures in specific contexts, not in command-line args
-            if any(pattern in message_str for pattern in failure_patterns):
+            if any(pattern in message_str for pattern in failure_patterns) or has_progress_failure:
                 # Additional validation: make sure this looks like an actual failure event
                 # Skip if it looks like command-line arguments or configuration
-                if ('--client_env' in message_str or 
+                if ('--client_env' in message_str or
                     '--default_override' in message_str or
                     'connect_timeout_secs' in message_str or
                     'fatal_event_bus_exceptions' in message_str):
                     return None
-            
+
             for pattern in failure_patterns:
                 if pattern in message_str:
-                    return self._extract_failure_details(message_str, pattern)
-                    
+                    return [self._extract_failure_details(message_str, pattern)]
+
+            # Handle progress failures
+            if has_progress_failure:
+                if 'FAIL:' in message_str:
+                    return [self._extract_failure_details(message_str, 'FAIL:')]
+                elif 'FAILED:' in message_str:
+                    return [self._extract_failure_details(message_str, 'FAILED:')]
+
         except Exception as e:
             if self.verbose:
                 logger.warning("Error parsing message: %s", e)
-                
+
         return None
     
     def _extract_failure_details(self, message_str: str, failure_type: str) -> Dict[str, Any]:
@@ -490,13 +580,11 @@ class BEPAnalyzer:
         
         # Look for Bazel target patterns (avoid URLs)
         target_patterns = [
-            # Full target like //pkg/sub:target - must have colon and valid package chars
-            r'//[a-zA-Z0-9_\-][a-zA-Z0-9_/\-]*:[a-zA-Z0-9_\-]+',
-            # Root target like //:target - colon required  
-            r'//:[a-zA-Z0-9_\-]+',
+            r'//[a-zA-Z0-9_\-][a-zA-Z0-9_/\-]*:[a-zA-Z0-9_/\-]+',  # //pkg:target
+            # //:target
+            r'//:[a-zA-Z0-9_/\-]+',
         ]
         
-        import re
         for line in lines:
             for pattern in target_patterns:
                 matches = re.findall(pattern, line)
@@ -539,7 +627,6 @@ class BEPAnalyzer:
             r'(WORKSPACE(?:\.bazel)?):(\d+):(?:\d+:)?\s*(.+)',
         ]
         
-        import re
         for line in lines:
             for pattern in file_location_patterns:
                 match = re.search(pattern, line)
@@ -593,6 +680,12 @@ class BEPAnalyzer:
 
 
 class BuildkiteAnnotator:
+    def __init__(self):
+        """Initialize the BuildkiteAnnotator with environment detection."""
+        self.is_buildkite = self._detect_buildkite_environment()
+        self.repo_url = self._get_repo_url()
+        self.commit_sha = self._get_commit_sha()
+
     def _get_buildkite_env(self, var_name: str, default: str = None) -> Optional[str]:
         """Helper to get Buildkite environment variable with consistent naming."""
         return os.getenv(f'BUILDKITE_{var_name}' if not var_name.startswith('BUILDKITE') else var_name, default)
@@ -878,7 +971,7 @@ def main():
     
     if args.verbose:
         logger.info("Analyzing BEP file: %s", args.bep_file)
-    
+
     try:
         # Initialize analyzer with custom limits
         analyzer = BEPAnalyzer(verbose=args.verbose)
