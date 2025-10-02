@@ -9,8 +9,9 @@ Uses proper protobuf parsing for more accurate failure detection.
 import argparse
 import sys
 import os
+import re
 import struct
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 from pathlib import Path
 import subprocess
 import logging
