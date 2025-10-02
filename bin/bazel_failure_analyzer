@@ -53,6 +53,7 @@ class BEPAnalyzer:
         self.verbose = verbose
         self.failures = []
         self.failures_skipped = 0  # Track skipped failures due to limits
+        self.seen_targets = set()  # Track targets to avoid duplicates
         # Limits (bytes, counts)
         self.MAX_FILE_SIZE = cfg.MAX_FILE_SIZE_MB_DEFAULT * 1024 * 1024
         self.MAX_FAILURES = cfg.MAX_FAILURES_DEFAULT
@@ -64,6 +65,7 @@ class BEPAnalyzer:
     def extract_failures(self, bep_file_path: str) -> List[Dict[str, Any]]:
         """Extract failure information from a BEP protobuf file."""
         failures = []
+        self.seen_targets.clear()  # Reset for each extract
 
         # Check file size before processing
         try:
@@ -98,10 +100,14 @@ class BEPAnalyzer:
                     # Parse the message for failure events (returns a list or None)
                     message_failures = self._parse_build_event_for_failure(message_data)
                     if message_failures:
-                        failures.extend(message_failures)
-                        if self.verbose:
-                            for failure in message_failures:
-                                logger.info("Found failure: %s", failure.get('target', 'Unknown'))
+                        # Remove duplicates by target
+                        for failure in message_failures:
+                            target = failure.get('target', 'unknown')
+                            if target not in self.seen_targets:
+                                self.seen_targets.add(target)
+                                failures.append(failure)
+                                if self.verbose:
+                                    logger.info("Found failure: %s", target)
 
                 # Check if we hit the failure limit
                 if len(failures) >= self.MAX_FAILURES:
@@ -112,7 +118,12 @@ class BEPAnalyzer:
                             break
                         message_failures = self._parse_build_event_for_failure(message_data)
                         if message_failures:
-                            self.failures_skipped += len(message_failures)
+                            # Count only new unique failures
+                            for failure in message_failures:
+                                target = failure.get('target', 'unknown')
+                                if target not in self.seen_targets:
+                                    self.seen_targets.add(target)
+                                    self.failures_skipped += 1
 
         except Exception as e:
             if self.verbose:
@@ -960,7 +971,7 @@ def main():
     
     if args.verbose:
         logger.info("Analyzing BEP file: %s", args.bep_file)
-    
+
     try:
         # Initialize analyzer with custom limits
         analyzer = BEPAnalyzer(verbose=args.verbose)
