@@ -461,15 +461,15 @@ class BEPAnalyzer:
             r'(BUILD(?:\.bazel)?):(\d+)',
             r'(WORKSPACE(?:\.bazel)?):(\d+)'
         ]
-        
+
         for s in strings:
             for pattern in file_patterns:
                 match = re.search(pattern, s)
                 if match:
                     return match.group(1), int(match.group(2))
-        
+
         return None, None
-    
+
     def _extract_all_progress_failures(self, message_str: str) -> Optional[List[Dict[str, Any]]]:
         """Extract unique test failures from a Progress event."""
         failures = []
@@ -555,7 +555,7 @@ class BEPAnalyzer:
                 logger.warning("Error parsing message: %s", e)
 
         return None
-    
+
     def _extract_failure_details(self, message_str: str, failure_type: str) -> Dict[str, Any]:
         """Extract failure details from message string."""
         # Normalize failure type for better display
@@ -564,7 +564,7 @@ class BEPAnalyzer:
             normalized_type = 'TEST_FAILED'
         elif failure_type == 'testFailureMessage':
             normalized_type = 'TEST_FAILED'
-            
+
         failure = {
             'type': 'build_failure',
             'status': normalized_type,
@@ -573,7 +573,7 @@ class BEPAnalyzer:
             'file_location': None,
             'line_number': None
         }
-        
+
         # Try to extract target information with better patterns
         lines = message_str.split('\n')
         target_found = False
@@ -584,7 +584,7 @@ class BEPAnalyzer:
             # //:target
             r'//:[a-zA-Z0-9_/\-]+',
         ]
-        
+
         for line in lines:
             for pattern in target_patterns:
                 matches = re.findall(pattern, line)
@@ -594,7 +594,7 @@ class BEPAnalyzer:
                     break
             if target_found:
                 break
-        
+
         # If no target found, try simpler patterns (avoid URLs)
         if not target_found:
             for line in lines:
@@ -605,8 +605,8 @@ class BEPAnalyzer:
                         if part.startswith('//'):
                             clean_part = part.strip('",;()[]{}')
                             # Skip URLs (contain dots) and ensure it looks like a target
-                            if (len(clean_part) > 2 and 
-                                '.' not in clean_part and 
+                            if (len(clean_part) > 2 and
+                                '.' not in clean_part and
                                 not clean_part.startswith('//http') and
                                 not clean_part.startswith('//www')):
                                 failure['target'] = clean_part
@@ -614,19 +614,19 @@ class BEPAnalyzer:
                                 break
                 if target_found:
                     break
-        
+
         # Extract file locations and line numbers
         file_location_patterns = [
             # Pattern like: "path/to/file.cc:123:45: error message"
             r'([a-zA-Z0-9_/\-\.]+\.(?:cc|cpp|h|hpp|py|java|go|js|ts|kt|scala|rs|c|C|cxx)):(\d+):(?:\d+:)?\s*(.+)',
-            # Pattern like: "path/to/file.py:42: message" 
+            # Pattern like: "path/to/file.py:42: message"
             r'([a-zA-Z0-9_/\-\.]+\.(?:cc|cpp|h|hpp|py|java|go|js|ts|kt|scala|rs|c|C|cxx)):(\d+):\s*(.+)',
             # BUILD file pattern: "BUILD:15:1: message"
             r'(BUILD(?:\.bazel)?):(\d+):(?:\d+:)?\s*(.+)',
             # Workspace file pattern
             r'(WORKSPACE(?:\.bazel)?):(\d+):(?:\d+:)?\s*(.+)',
         ]
-        
+
         for line in lines:
             for pattern in file_location_patterns:
                 match = re.search(pattern, line)
@@ -644,7 +644,7 @@ class BEPAnalyzer:
         if not failure['message']:
             error_lines = []
             relevant_keywords = ['error', 'failed', 'exception', 'timeout', 'compilation']
-            
+
             for line in lines:
                 line_lower = line.lower()
                 if any(word in line_lower for word in relevant_keywords):
@@ -655,11 +655,11 @@ class BEPAnalyzer:
                         if len(line_text) > self.MAX_MESSAGE_SIZE // self.MAX_ERROR_LINES:
                             line_text = line_text[:self.MAX_MESSAGE_SIZE // self.MAX_ERROR_LINES] + "... (truncated)"
                         error_lines.append(line_text)
-                
+
                 # Stop if we have enough lines
                 if len(error_lines) >= self.MAX_ERROR_LINES:
                     break
-            
+
             if error_lines:
                 message = '\n'.join(error_lines[:self.MAX_ERROR_LINES])
                 # Ensure total message doesn't exceed limit
@@ -675,7 +675,7 @@ class BEPAnalyzer:
                             failure_msg = failure_msg[:self.MAX_MESSAGE_SIZE] + "... (truncated)"
                         failure['message'] = failure_msg
                         break
-        
+
         return failure
 
 
@@ -689,11 +689,11 @@ class BuildkiteAnnotator:
     def _get_buildkite_env(self, var_name: str, default: str = None) -> Optional[str]:
         """Helper to get Buildkite environment variable with consistent naming."""
         return os.getenv(f'BUILDKITE_{var_name}' if not var_name.startswith('BUILDKITE') else var_name, default)
-    
+
     def _detect_buildkite_environment(self) -> bool:
         """Detect if running in Buildkite environment by checking key environment variables."""
         return bool(self._get_buildkite_env('BUILDKITE') or self._get_buildkite_env('BUILD_ID'))
-        
+
     def _get_repo_url(self) -> Optional[str]:
         """Get the GitHub repository URL."""
         # Try Buildkite environment first
@@ -704,10 +704,10 @@ class BuildkiteAnnotator:
                 return buildkite_repo.replace('git@github.com:', 'https://github.com/').rstrip('.git')
             elif buildkite_repo.startswith('https://github.com/'):
                 return buildkite_repo.rstrip('.git')
-        
+
         # Fallback: try to get from git remote
         try:
-            result = subprocess.run(['git', 'remote', 'get-url', 'origin'], 
+            result = subprocess.run(['git', 'remote', 'get-url', 'origin'],
                                  capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 remote_url = result.stdout.strip()
@@ -717,57 +717,70 @@ class BuildkiteAnnotator:
                     return remote_url.rstrip('.git')
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
-        
+
         return None
-    
+
     def _get_commit_sha(self) -> str:
         """Get the current commit SHA."""
         # Try Buildkite environment first
         commit = self._get_buildkite_env('COMMIT')
         if commit:
             return commit
-            
+
         # Try branch if no commit SHA
         branch = self._get_buildkite_env('BRANCH')
         if branch:
             return branch
-            
+
         # Fallback: try to get from git
         try:
-            result = subprocess.run(['git', 'rev-parse', 'HEAD'], 
+            result = subprocess.run(['git', 'rev-parse', 'HEAD'],
                                  capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 return result.stdout.strip()
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
-            
+
         return 'main'  # Default fallback
-    
+
     def _create_github_link(self, file_path: str, line_number: Optional[int] = None) -> Optional[str]:
         """Create a GitHub link to a file and line number."""
         if not self.repo_url or not file_path:
             return None
-            
+
+        # Skip build artifacts to prevent broken links
+        build_artifact_patterns = [
+            '/.cache/bazel/',
+            '/bazel-out/',
+            '/execroot/',
+            'test_attempts/',
+            'test.log',
+            'test.xml'
+        ]
+
+        if any(pattern in file_path for pattern in build_artifact_patterns):
+            return None
+
         # Clean up file path (remove leading ./ or workspace prefixes)
         clean_path = file_path.lstrip('./')
-        
+
         github_url = f"{self.repo_url}/blob/{self.commit_sha}/{clean_path}"
-        
+
         if line_number:
             github_url += f"#L{line_number}"
-            
+
         return github_url
-        
+
     def create_failure_annotation(self, failures: List[Dict[str, Any]], verbose: bool = False):
         """Create a focused Buildkite annotation for failures."""
         if not failures:
             if verbose:
                 logger.info("No failures to annotate")
             return
-            
+
         # Generate annotation content
         annotation_content = self._generate_annotation_content(failures)
-        
+
         if self.is_buildkite:
             self._create_buildkite_annotation(annotation_content, verbose)
         else:
@@ -777,15 +790,15 @@ class BuildkiteAnnotator:
             print("=" * 60)
             print(annotation_content)
             print("=" * 60)
-    
+
     def _generate_annotation_content(self, failures: List[Dict[str, Any]]) -> str:
         """Generate the annotation content."""
         failure_count = len(failures)
-        
+
         content = f"""### 🚨 Build Failures ({failure_count} found)
 
 """
-        
+
         # Group failures by type
         failure_types = {}
         for failure in failures:
@@ -793,21 +806,21 @@ class BuildkiteAnnotator:
             if failure_type not in failure_types:
                 failure_types[failure_type] = []
             failure_types[failure_type].append(failure)
-        
+
         # Display failures by type
         for failure_type, type_failures in failure_types.items():
             content += f"#### {self._get_failure_emoji(failure_type)} {failure_type.replace('_', ' ').title()} ({len(type_failures)})\n\n"
-            
+
             for failure in type_failures:
                 target = failure.get('target', 'Unknown target')
                 status = failure.get('status', 'FAILED')
                 message = failure.get('message', '')
                 file_location = failure.get('file_location')
                 line_number = failure.get('line_number')
-                
+
                 content += f"**Target:** `{target}`  \n"
                 content += f"**Status:** {status}  \n"
-                
+
                 # Add GitHub link if we have file location
                 if file_location:
                     github_link = self._create_github_link(file_location, line_number)
@@ -816,20 +829,24 @@ class BuildkiteAnnotator:
                         content += f"**File:** [{display_location}]({github_link})  \n"
                     else:
                         display_location = f"{file_location}:{line_number}" if line_number else file_location
-                        content += f"**File:** `{display_location}`  \n"
-                
+                        # Show build artifacts as strings instead of broken links
+                        if any(pattern in file_location for pattern in ['/.cache/bazel/', '/bazel-out/', '/execroot/', 'test_attempts/']):
+                            content += f"**Log:** `{display_location}`  \n"
+                        else:
+                            content += f"**File:** `{display_location}`  \n"
+
                 if message:
                     # Clean up the message
                     clean_message = self._clean_error_message(message)
                     content += f"**Error:**\n```\n{clean_message}\n```\n\n"
                 else:
                     content += "\n"
-        
+
         content += "---\n"
         content += "*Generated by Bazel Failure Analyzer*\n"
-        
+
         return content
-    
+
     def _get_failure_emoji(self, failure_type: str) -> str:
         """Get appropriate emoji for failure type."""
         emoji_map = {
@@ -840,30 +857,30 @@ class BuildkiteAnnotator:
             'unknown': '❓'
         }
         return emoji_map.get(failure_type, '❌')
-    
+
     def _clean_error_message(self, message: str) -> str:
         """Clean up error message for display."""
         # Remove excessive whitespace
         lines = [line.strip() for line in message.split('\n') if line.strip()]
-        
+
         # Limit to reasonable length
         max_lines = 15  # Allow a bit more for display
         if len(lines) > max_lines:
             lines = lines[:max_lines] + ['... (truncated)']
-        
+
         # Use Buildkite's full annotation limit
         result = '\n'.join(lines)
         max_annotation_size = 1024 * 1024  # Buildkite's 1MB annotation limit
-        
+
         # Warn if getting close to limit (500KB+) - lightweight check
         if len(result) > 500 * 1024:
             logger.warning("Large annotation: %.0fKB (Buildkite limit: 1MB)", len(result) / 1024)
-        
+
         if len(result) > max_annotation_size:
             result = result[:max_annotation_size] + f'\n... (truncated from {len(result)} to {max_annotation_size} chars due to Buildkite 1MB limit)'
-        
+
         return result
-    
+
     def _create_buildkite_annotation(self, content: str, verbose: bool = False):
         """Create actual Buildkite annotation with retry logic."""
         # Use step ID as context so each step gets its own annotation
@@ -945,9 +962,9 @@ def main():
         default=100,
         help="Maximum file size to process in MB (default: 100, prevents memory issues with large BEP files)"
     )
-    
+
     args = parser.parse_args()
-    
+
     # Check protobuf availability
     if args.verbose:
         if PROTOBUF_AVAILABLE:
@@ -955,12 +972,12 @@ def main():
         else:
             print("⚠️  Protobuf library not available, using fallback string parsing")
             print("   Install with: pip install protobuf")
-    
+
     # Check if BEP file exists
     if not os.path.exists(args.bep_file):
         print(f"❌ Error: BEP file not found: {args.bep_file}", file=sys.stderr)
         return 1
-    
+
     # Configure logging to stdout; INFO on verbose, WARNING otherwise
     handler = logging.StreamHandler(stream=sys.stdout)
     handler.setFormatter(logging.Formatter('%(message)s'))
@@ -968,7 +985,7 @@ def main():
     if not root_logger.handlers:
         root_logger.addHandler(handler)
     root_logger.setLevel(logging.INFO if args.verbose else logging.WARNING)
-    
+
     if args.verbose:
         logger.info("Analyzing BEP file: %s", args.bep_file)
 
@@ -977,10 +994,10 @@ def main():
         analyzer = BEPAnalyzer(verbose=args.verbose)
         analyzer.MAX_FAILURES = args.max_failures
         analyzer.MAX_FILE_SIZE = args.max_file_size * 1024 * 1024  # Convert MB to bytes
-        
+
         # Parse BEP file
         failures = analyzer.extract_failures(args.bep_file)
-        
+
         if not failures:
             if args.verbose:
                 logger.info("No failures found in BEP file")
@@ -989,7 +1006,7 @@ def main():
             else:
                 print("✅ Build completed successfully - no failures detected")
                 return 0
-        
+
         # Generate output based on format
         if args.output_format == "buildkite":
             annotator = BuildkiteAnnotator()
@@ -1005,9 +1022,9 @@ def main():
                 print(f"   Status: {failure.get('status', 'FAILED')}")
                 if failure.get('message'):
                     print(f"   Message: {failure['message']}")
-        
+
         return 1 if failures else 0
-        
+
     except Exception as e:
         print(f"❌ Error analyzing BEP file: {e}", file=sys.stderr)
         if args.verbose:
