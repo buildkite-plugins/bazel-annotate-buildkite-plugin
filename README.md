@@ -51,7 +51,7 @@ steps:
     command: |
       bazel build //... --build_event_binary_file=bazel-events.pb
     plugins:
-      - bazel-annotate#v1.1.0:
+      - bazel-annotate#v1.1.1:
           bep_file: bazel-events.pb
 ```
 
@@ -64,7 +64,7 @@ steps:
       # Command might not produce a BEP file
       bazel build //...
     plugins:
-      - bazel-annotate#v1.1.0:
+      - bazel-annotate#v1.1.1:
           skip_if_no_bep: true
 ```
 
@@ -76,7 +76,7 @@ steps:
     command: |
       bazel test //... --build_event_binary_file=bazel-test-events.pb
     plugins:
-      - bazel-annotate#v1.1.0:
+      - bazel-annotate#v1.1.1:
           bep_file: bazel-test-events.pb
 ```
 
@@ -88,21 +88,21 @@ steps:
     command: |
       bazel build //... --build_event_binary_file=bazel-build-events.pb
     plugins:
-      - bazel-annotate#v1.1.0:
+      - bazel-annotate#v1.1.1:
           bep_file: bazel-build-events.pb
 
   - label: "🧪 Test with Bazel"
     command: |
       bazel test //... --build_event_binary_file=bazel-test-events.pb
     plugins:
-      - bazel-annotate#v1.1.0:
+      - bazel-annotate#v1.1.1:
           bep_file: bazel-test-events.pb
 
   - label: "📦 Package with Bazel"
     command: |
       bazel run //:package --build_event_binary_file=bazel-package-events.pb
     plugins:
-      - bazel-annotate#v1.1.0:
+      - bazel-annotate#v1.1.1:
           bep_file: bazel-package-events.pb
 ```
 
