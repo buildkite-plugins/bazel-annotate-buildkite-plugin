@@ -577,7 +577,7 @@ class BEPAnalyzer:
         # Try to extract target information with better patterns
         lines = message_str.split('\n')
         target_found = False
-        
+
         # Look for Bazel target patterns (avoid URLs)
         target_patterns = [
             r'//[a-zA-Z0-9_\-][a-zA-Z0-9_/\-]*:[a-zA-Z0-9_/\-]+',  # //pkg:target
