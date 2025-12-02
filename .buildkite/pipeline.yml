@@ -3,7 +3,7 @@ steps:
     steps:
       - label: ":shell: Tests"
         plugins:
-          - plugin-tester#v1.1.1:
+          - plugin-tester#v1.3.0:
               folders:
                 - tests
       - label: ":bazel: Bazel Tests"
