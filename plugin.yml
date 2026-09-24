@@ -15,6 +15,10 @@ configuration:
     verbose:
       type: boolean
       description: "Enable verbose output (default: false)"
+    annotation_scope:
+      type: string
+      enum: [build, job]
+      description: "Where to display the annotation (default: build)"
     max_failures:
       type: integer
       description: "Maximum number of failures to collect (default: 50)"

@@ -13,8 +13,10 @@ DIR="$(cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd)"
 BEP_FILE=$(plugin_read_config BEP_FILE "")
 SKIP_IF_NO_BEP=$(plugin_read_config SKIP_IF_NO_BEP "false")
 VERBOSE=$(plugin_read_config VERBOSE "false")
+ANNOTATION_SCOPE=$(plugin_read_config ANNOTATION_SCOPE "build")
 MAX_FAILURES=$(plugin_read_config MAX_FAILURES "50")
 MAX_FILE_SIZE_MB=$(plugin_read_config MAX_FILE_SIZE_MB "100")
+export BUILDKITE_ANNOTATION_SCOPE="${ANNOTATION_SCOPE}"
 
 echo "🔍 Bazel Failure Analyzer - Looking for BEP protobuf file..."
 
