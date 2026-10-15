@@ -13,6 +13,7 @@ DIR="$(cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd)"
 BEP_FILE=$(plugin_read_config BEP_FILE "")
 SKIP_IF_NO_BEP=$(plugin_read_config SKIP_IF_NO_BEP "false")
 VERBOSE=$(plugin_read_config VERBOSE "false")
+FAIL_ON_FINDINGS=$(plugin_read_config FAIL_ON_FINDINGS "true")
 MAX_FAILURES=$(plugin_read_config MAX_FAILURES "50")
 MAX_FILE_SIZE_MB=$(plugin_read_config MAX_FILE_SIZE_MB "100")
 
@@ -83,17 +84,23 @@ ANALYZER_ARGS+=("--max-failures" "${MAX_FAILURES}")
 ANALYZER_ARGS+=("--max-file-size" "${MAX_FILE_SIZE_MB}")
 
 # Run the analyzer
-"$ANALYZER_BINARY" "${ANALYZER_ARGS[@]}"
-analyzer_exit_code=$?
+if "$ANALYZER_BINARY" "${ANALYZER_ARGS[@]}"; then
+  analyzer_exit_code=0
+else
+  analyzer_exit_code=$?
+fi
 
 case $analyzer_exit_code in
   0)
     # No failures found - success (analyzer already printed the message)
     ;;
   1)
-    # Failures found - this should fail the build
-    echo "🚨 Build failures detected - failing the build"
-    exit 1
+    # Failures found - the analyzer already created the annotation
+    if [[ "${FAIL_ON_FINDINGS}" == "true" ]]; then
+      echo "🚨 Build failures detected - failing the build"
+      exit 1
+    fi
+    echo "🚨 Build failures detected and annotated - preserving the command's status"
     ;;
   *)
     # Analyzer error (exit code 2+)
